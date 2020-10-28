@@ -1,6 +1,6 @@
 ---
 title: "Interesting R Examples"
-author: "Name Surname - IE582 - Fall 2020"
+author: "Zeynep Hasgül - IE582 - Fall 2020"
 ---
 ```{r,echo=FALSE,results="hide"}
 library(knitr)
