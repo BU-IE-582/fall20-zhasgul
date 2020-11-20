@@ -1,0 +1,524 @@
+---
+title: "Home Work 1"
+author: "Zeynep Hasgül"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+
+---
+
+
+<style>
+#TOC {
+  color: #708090;
+  font-family: Calibri;
+  font-size: 16px;
+  border-color: #708090;
+  }
+  body {
+    color: #708090;
+    font-family: Calibri;
+    background-color: #F5F5F5;
+  }
+  pre {
+    color: #708090;
+    background-color: #F8F8F8;
+  }
+  </style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r library}
+library(data.table)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(ggthemes)
+library(gridExtra)
+```
+
+```{r data}
+data2020 = fread("~/Desktop/E0_20202021.csv", select = c(2, 4:42))
+data2019 = fread("~/Desktop/E0_20192020.csv", select = c(2, 4:42))
+data2018 = fread("~/Desktop/E0_20182019.csv", select = 2:41)
+data = rbind(data2020, data2019, data2018)
+```
+
+The dataset provides match betting odds data of English Premier League in season 2020/2021, season 2019/2020 and season 2018/2019.
+
+
+# Task 1
+
+## Subtask 1
+To get a basic  idea on how the data is distributed. First the histogram of the number of goals scored by home team and away team team are given. Then, the goal difference between number of goals of home team and away team is presented as histogram.
+
+### Home Score Goals
+```{r home-score-goals}
+
+  ggplot(data, aes(x = as.factor(FTHG))) +
+  geom_histogram(stat = "count") +
+  theme_fivethirtyeight() +
+  labs(x = "Home Goals",
+       y = "Number of Games")
+```
+
+### Away Score Goals
+```{r away-score-goals}
+
+  ggplot(data, aes(x = as.factor(FTAG))) +
+  geom_histogram(stat = "count") +
+  theme_fivethirtyeight()  +
+  labs(x = "Away Goals",
+       y = "Number of Games")
+```
+
+### Home Score Goals - Away Score Goals
+```{r home-score-goals-minus-away-score-goals}
+
+  ggplot(data, aes(x = as.factor(FTHG - FTAG))) +
+  geom_histogram(stat = "count") +
+  theme_fivethirtyeight() +
+  labs(x = "Home Goals - Away Goals",
+       y = "Number of Games")
+```
+
+## Subtask 2
+Game scores are discrete outcomes therefore we can expect it to follow Poisson distribution. We can assume that the expected number of goals a team will make is given by a Poisson distribution. In the histogram below actual outcomes are given and theoretical Poisson distribution is represented with the line. 
+
+```{r home poisson}
+xfit = seq(min(data$FTHG), max(data$FTHG), by = 1)
+yfit = dpois(xfit, lambda = mean(data$FTHG))
+pois = data.table(x = xfit, y = yfit)
+
+ggplot() +
+  geom_histogram(aes(x = FTHG), stat = "count", data = data) +
+  geom_line(aes(x = x, y = y * nrow(data)), data = pois, color="red") +
+  theme_fivethirtyeight() +
+  labs(x = "Home Goals",
+       y = "Number of Games")
+```
+
+```{r away poisson}
+xfit = seq(min(data$FTAG), max(data$FTAG), by = 1)
+yfit = dpois(xfit, lambda = mean(data$FTAG))
+pois = data.table(x = xfit, y = yfit)
+
+ggplot() +
+  geom_histogram(aes(x = FTAG), stat = "count", data = data) +
+  geom_line(aes(x = x, y = y * nrow(data)), data = pois, color="red") +
+  theme_fivethirtyeight() +
+  labs(x = "Away Goals",
+       y = "Number of Games")
+```
+
+Poisson assumption aligns well with the actual match results, which can be seen from the histograms.
+
+# Task 2
+
+There are six different bet sites: B365, BW, IW, PS, WH, and VC. I choose first 4 to analyze.
+Each data contains three columns in the data for home, draw and away statistics.  first I calculate the 
+
+## Subtask 1
+The odds we are using in the data are given in a format known as European style in the gambling community, which for a fair (no-margin) bet is given as odds = 1=P(win).
+Therefore P(home win), P(tie) and P(away win) are calculated by P(x) = 1/odd.
+
+```{r odds to probability}
+#B365
+data$B365_home_win_prob = 1 / data$B365H
+data$B365_draw_prob = 1 / data$B365D
+data$B365_away_win_prob = 1 / data$B365A
+
+#BW
+data$BW_home_win_prob = 1 / data$BWH
+data$BW_draw_prob = 1 / data$BWD
+data$BW_away_win_prob = 1 / data$BWA
+
+#IW
+data$IW_home_win_prob = 1 / data$IWH
+data$IW_draw_prob = 1 / data$IWD
+data$IW_away_win_prob = 1 / data$IWA
+
+#PS
+data$PS_home_win_prob = 1 / data$PSH
+data$PS_draw_prob = 1 / data$PSD
+data$PS_away_win_prob = 1 / data$PSA
+```
+
+## Subtask 2
+
+Normally if we take the sum of the probabilities for all the outcomes in one game outcomes found by taking the inverse of the odd we would expect the sum to be equal to one. However in real data we can see thet for the bets stated above the sum is greater than one which means there is a margin added by the bookmakers. Therefore we need to normalize these probabilities.
+
+```{r normalized probalility}
+#B365 normalized
+data$B365_homewin_prob_normalized = data$B365_home_win_prob / (data$B365_home_win_prob + data$B365_draw_prob + data$B365_away_win_prob)
+data$B365_draw_prob_normalized = data$B365_draw_prob/ (data$B365_home_win_prob + data$B365_draw_prob+ data$B365_away_win_prob)
+data$B365_awaywin_prob_normalized = data$B365_away_win_prob / (data$B365_home_win_prob + data$B365_draw_prob+ data$B365_away_win_prob)
+
+#BW normalized
+data$BW_homewin_prob_normalized  = data$BW_home_win_prob / (data$BW_home_win_prob + data$BW_draw_prob+ data$BW_away_win_prob)
+data$BW_draw_prob_normalized = data$BW_draw_prob/ (data$BW_home_win_prob + data$BW_draw_prob+ data$BW_away_win_prob)
+data$BW_awaywin_prob_normalized = data$BW_away_win_prob / (data$BW_home_win_prob + data$BW_draw_prob+ data$BW_away_win_prob)
+
+#IW normalized
+data$IW_homewin_prob_normalized  = data$IW_home_win_prob / (data$IW_home_win_prob + data$IW_draw_prob+ data$IW_away_win_prob)
+data$IW_draw_prob_normalized = data$IW_draw_prob/ (data$IW_home_win_prob + data$IW_draw_prob+ data$IW_away_win_prob)
+data$IW_awaywin_prob_normalized = data$IW_away_win_prob / (data$IW_home_win_prob + data$IW_draw_prob+ data$IW_away_win_prob)
+
+#PS normalized
+data$PS_homewin_prob_normalized  = data$PS_home_win_prob / (data$PS_home_win_prob + data$PS_draw_prob+ data$PS_away_win_prob)
+data$PS_draw_prob_normalized = data$PS_draw_prob/ (data$PS_home_win_prob + data$PS_draw_prob+ data$PS_away_win_prob)
+data$PS_awaywin_prob_normalized = data$PS_away_win_prob / (data$PS_home_win_prob + data$PS_draw_prob+ data$PS_away_win_prob)
+```
+
+## Subtask 3
+An empirical evidence for the probability of draw can be calculated by determining the certain probability intervals on the implied probabilities by the bookmakers for the specific result. For this I determined a probability range of 0.1. Within this range the games that finished as draw are counted. In other words, the probability of draw values are discretized into bins size of 0.1 and the number of games ended as draw in the corresponding bin are calculated. Dividing this value by the total number of games in the corresponding bin provides the estimated probability of draws.
+
+```{r B365 draw performance}
+data = data %>%
+  mutate(FTR_category = ifelse(FTR == 'D', 1, 0)) %>%
+  mutate(group = case_when(B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.9 ~ "1",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.8 ~ "2",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.7 ~ "3",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.6 ~ "4",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.5 ~ "5",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.4 ~ "6",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.3 ~ "7",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.2 ~ "8",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.1 ~ "9",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0 ~ "10",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.1 ~ "11",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.2 ~ "12",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.3 ~ "13",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.4 ~ "14",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.5 ~ "15",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.6 ~ "16",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.7 ~ "17",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.8 ~ "18",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.9 ~ "19",
+            TRUE ~ "20")) %>%
+  group_by(group) %>%
+  mutate(result_B365 = mean(FTR_category))
+
+B365_with_red <- ggplot() +
+  geom_point(aes(x = B365_homewin_prob_normalized - B365_awaywin_prob_normalized, y = result_B365), data = data, color = "red", alpha=0.2) +
+  geom_point(aes(x = B365_homewin_prob_normalized - B365_awaywin_prob_normalized, y = B365_draw_prob_normalized), data = data, alpha=0.4) +
+  theme_fivethirtyeight() +
+  labs(title = "With Red Cards, Normalized Probability vs. Actual Probability",
+       subtitle = "Bookmaker: B365",
+       x = "Normalized Home Probability - Normalized Away Probability",
+       y = "Results")
+
+B365_with_red
+```
+
+## Subtask 4
+
+Same operation is done for other bookmakers as well.
+
+
+```{r BW draw performance}
+data = data %>%
+  mutate(group = case_when(BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.9 ~ "1",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.8 ~ "2",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.7 ~ "3",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.6 ~ "4",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.5 ~ "5",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.4 ~ "6",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.3 ~ "7",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.2 ~ "8",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.1 ~ "9",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0 ~ "10",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.1 ~ "11",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.2 ~ "12",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.3 ~ "13",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.4 ~ "14",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.5 ~ "15",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.6 ~ "16",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.7 ~ "17",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.8 ~ "18",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.9 ~ "19",
+            TRUE ~ "20")) %>%
+  group_by(group) %>%
+  mutate(result_BW = mean(FTR_category))
+
+BW_with_red <- ggplot() +
+  geom_point(aes(x = BW_homewin_prob_normalized - BW_awaywin_prob_normalized, y = result_BW), data = data, color = "red", alpha=0.2) +
+  geom_point(aes(x = BW_homewin_prob_normalized - BW_awaywin_prob_normalized, y = BW_draw_prob_normalized), data = data, alpha=0.4) +
+  theme_fivethirtyeight() +
+  labs(title = "With Red Cards, Normalized Probability vs. Actual Probability",
+       subtitle = "Bookmaker: BW",
+       x = "Normalized Home Probability - Normalized Away Probability",
+       y = "Results")
+
+BW_with_red
+
+```
+
+```{r IW draw performance}
+data = data %>%
+  mutate(group = case_when(IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.9 ~ "1",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.8 ~ "2",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.7 ~ "3",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.6 ~ "4",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.5 ~ "5",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.4 ~ "6",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.3 ~ "7",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.2 ~ "8",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.1 ~ "9",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0 ~ "10",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.1 ~ "11",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.2 ~ "12",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.3 ~ "13",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.4 ~ "14",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.5 ~ "15",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.6 ~ "16",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.7 ~ "17",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.8 ~ "18",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.9 ~ "19",
+            TRUE ~ "20")) %>%
+  group_by(group) %>%
+  mutate(result_IW = mean(FTR_category))
+
+IW_with_red <- ggplot() +
+  geom_point(aes(x = IW_homewin_prob_normalized - IW_awaywin_prob_normalized, y = result_IW), data = data, color = "red", alpha=0.2) +
+  geom_point(aes(x = IW_homewin_prob_normalized - IW_awaywin_prob_normalized, y = IW_draw_prob_normalized), data = data, alpha=0.4) +
+  theme_fivethirtyeight() +
+  labs(title = "With Red Cards, Normalized Probability vs. Actual Probability",
+       subtitle = "Bookmaker: IW",
+       x = "Normalized Home Probability - Normalized Away Probability",
+       y = "Results")
+
+IW_with_red
+
+```
+
+
+```{r PS draw performance}
+data = data %>%
+  mutate(group = case_when(PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.9 ~ "1",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.8 ~ "2",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.7 ~ "3",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.6 ~ "4",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.5 ~ "5",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.4 ~ "6",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.3 ~ "7",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.2 ~ "8",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.1 ~ "9",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0 ~ "10",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.1 ~ "11",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.2 ~ "12",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.3 ~ "13",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.4 ~ "14",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.5 ~ "15",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.6 ~ "16",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.7 ~ "17",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.8 ~ "18",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.9 ~ "19",
+            TRUE ~ "20")) %>%
+  group_by(group) %>%
+  mutate(result_PS = mean(FTR_category))
+
+PS_with_red <- ggplot() +
+  geom_point(aes(x = PS_homewin_prob_normalized - PS_awaywin_prob_normalized, y = result_PS), data = data, color = "red", alpha=0.2) +
+  geom_point(aes(x = PS_homewin_prob_normalized - PS_awaywin_prob_normalized, y = PS_draw_prob_normalized), data = data, alpha=0.4) +
+  theme_fivethirtyeight() +
+  labs(title = "With Red Cards, Normalized Probability vs. Actual Probability",
+       subtitle = "Bookmaker: PS",
+       x = "Normalized Home Probability - Normalized Away Probability",
+       y = "Results")
+
+PS_with_red
+
+
+```
+To be able to compare them better we can plot the graphs next to each other.
+
+```{r compaare}
+grid.arrange(B365_with_red , BW_with_red, IW_with_red, PS_with_red, nrow = 1)
+```
+
+
+In the plots can see that for the bookmaker B365 there is one bin, for the bookmaker BW there are two bins, and for the bookmaker PS there is one bin that is above the curve. However for the bookmaker Iw there is no bin that is above the curve. So, what does it mean?
+
+Let's remember that here the curve represents the normalized game outcomes that we have calculated using P(x) = 1/odd formula. And the bins give us how the games actually resulted. 
+
+If the actual match results were to be distributed exactly by the normalized probabilities we calculated, we would always lose in the long run due to the bookmaker's margin. However, the bookmakers may not set their odds by the best possible predictions, so we should not assume that equation P(x) = 1/odd holds in real life. The main objective of bookmakers is to maximize their gain and not to calculate probabilities as good as possible. Therefore the odds are adjusted accordingly to the demand and odds mostly represent the public opinion about the outcome rather than true probabilities. This is called the odds bias. And, if we could formulate a method that predicts the outcomes better the public opinion plus the bookmaker's margin one could make money from betting. 
+
+Because of the odds bias the trend line in the odds may not be well-aligned with the actual outcome of the matches. This is what wee see in the graphs. For bookmaker B365, BW and, PS there are bins that odds do not match with actual outcomes. Especially where draw occurs. This means that games result with odds more often than odds represent. For example in real life a team can follow a strategy to play for the draw rather than to win. 
+
+We can conclude this analysis by saying that the bookmakers B365, BW and, PS are not good at determining bets for the games result with draw and they have odds bias. On the other hand the bookmaker IW is successful at setting odds for draw games.
+
+
+
+# Task 3
+
+Sometimes the red card can be affect the result of the games and this affect also affect match probabilities. To check this hypothesis we can repeat previous calculations after filtering games without red cards.
+
+By setting and filtering HR (home red card) and AR (away red card) equal to 0, that is the both of them do not have player with red card, we can create a new data set without red cards.
+
+
+```{r}
+data_without_redcard = data %>%
+  filter(HR + AR == 0)
+head(data_without_redcard)
+```
+
+```{r}
+data_without_redcard = data_without_redcard %>%
+  mutate(group = case_when(B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.9 ~ "1",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.8 ~ "2",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.7 ~ "3",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.6 ~ "4",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.5 ~ "5",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.4 ~ "6",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.3 ~ "7",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.2 ~ "8",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < -0.1 ~ "9",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0 ~ "10",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.1 ~ "11",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.2 ~ "12",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.3 ~ "13",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.4 ~ "14",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.5 ~ "15",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.6 ~ "16",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.7 ~ "17",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.8 ~ "18",
+            B365_homewin_prob_normalized - B365_awaywin_prob_normalized < 0.9 ~ "19",
+            TRUE ~ "20")) %>%
+  group_by(group) %>%
+  mutate(result_B365 = mean(FTR_category))
+
+B365_without_redcard <- ggplot() +
+  geom_point(aes(x = B365_homewin_prob_normalized - B365_awaywin_prob_normalized, y = result_B365), data = data_without_redcard, color = "red", alpha=0.2) +
+  geom_point(aes(x = B365_homewin_prob_normalized - B365_awaywin_prob_normalized, y = B365_draw_prob_normalized), data = data_without_redcard, alpha=0.4) +
+  theme_fivethirtyeight() +
+  labs(title = "Without Red Cards, Normalized Probability vs. Actual Probability without Red Cards",
+       subtitle = "Bookmaker: B365",
+       x = " Normalized Home Probability - Normalized Away Probability",
+       y = "Results")
+
+B365_without_redcard
+```
+
+```{r}
+data_without_redcard = data_without_redcard %>%
+  mutate(group = case_when(BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.9 ~ "1",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.8 ~ "2",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.7 ~ "3",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.6 ~ "4",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.5 ~ "5",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.4 ~ "6",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.3 ~ "7",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.2 ~ "8",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < -0.1 ~ "9",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0 ~ "10",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.1 ~ "11",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.2 ~ "12",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.3 ~ "13",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.4 ~ "14",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.5 ~ "15",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.6 ~ "16",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.7 ~ "17",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.8 ~ "18",
+            BW_homewin_prob_normalized - BW_awaywin_prob_normalized < 0.9 ~ "19",
+            TRUE ~ "20")) %>%
+  group_by(group) %>%
+  mutate(result_BW = mean(FTR_category))
+
+BW_without_redcard <- ggplot() +
+  geom_point(aes(x = BW_homewin_prob_normalized - BW_awaywin_prob_normalized, y = result_BW), data = data_without_redcard, color = "red", alpha=0.2) +
+  geom_point(aes(x = BW_homewin_prob_normalized - BW_awaywin_prob_normalized, y = BW_draw_prob_normalized), data = data_without_redcard, alpha=0.4) +
+  theme_fivethirtyeight() +
+  labs(title = "Without Red Cards, Normalized Probability vs. Actual Probability without Red Cards",
+       subtitle = "Bookmaker: BW",
+       x = "Normalized Home Probability - Normalized Away Probability",
+       y = "Results")
+
+BW_without_redcard
+```
+
+```{r}
+data_without_redcard = data_without_redcard %>%
+  mutate(group = case_when(IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.9 ~ "1",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.8 ~ "2",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.7 ~ "3",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.6 ~ "4",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.5 ~ "5",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.4 ~ "6",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.3 ~ "7",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.2 ~ "8",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < -0.1 ~ "9",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0 ~ "10",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.1 ~ "11",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.2 ~ "12",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.3 ~ "13",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.4 ~ "14",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.5 ~ "15",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.6 ~ "16",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.7 ~ "17",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.8 ~ "18",
+            IW_homewin_prob_normalized - IW_awaywin_prob_normalized < 0.9 ~ "19",
+            TRUE ~ "20")) %>%
+  group_by(group) %>%
+  mutate(result_IW = mean(FTR_category))
+
+IW_without_redcard <- ggplot() +
+  geom_point(aes(x = IW_homewin_prob_normalized - IW_awaywin_prob_normalized, y = result_IW), data = data_without_redcard, color = "red", alpha=0.2) +
+  geom_point(aes(x = IW_homewin_prob_normalized - IW_awaywin_prob_normalized, y = IW_draw_prob_normalized), data = data_without_redcard, alpha=0.4) +
+  theme_fivethirtyeight() +
+  labs(title = "Without Red Cards, Normalized Probability vs. Actual Probability without Red Cards",
+       subtitle = "Bookmaker: IW",
+       x = "Normalized Home Probability - Normalized Away Probability",
+       y = "Results")
+
+IW_without_redcard
+```
+
+```{r}
+data_without_redcard = data_without_redcard %>%
+  mutate(group = case_when(PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.9 ~ "1",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.8 ~ "2",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.7 ~ "3",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.6 ~ "4",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.5 ~ "5",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.4 ~ "6",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.3 ~ "7",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.2 ~ "8",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < -0.1 ~ "9",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0 ~ "10",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.1 ~ "11",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.2 ~ "12",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.3 ~ "13",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.4 ~ "14",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.5 ~ "15",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.6 ~ "16",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.7 ~ "17",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.8 ~ "18",
+            PS_homewin_prob_normalized - PS_awaywin_prob_normalized < 0.9 ~ "19",
+            TRUE ~ "20")) %>%
+  group_by(group) %>%
+  mutate(result_PS = mean(FTR_category))
+
+PS_without_redcard <- ggplot() +
+  geom_point(aes(x = PS_homewin_prob_normalized - PS_awaywin_prob_normalized, y = result_PS), data = data_without_redcard, color = "red", alpha=0.2) +
+  geom_point(aes(x = PS_homewin_prob_normalized - PS_awaywin_prob_normalized, y = PS_draw_prob_normalized), data = data_without_redcard, alpha=0.4) +
+  theme_fivethirtyeight() +
+  labs(title = "Without Red Cards, Normalized Probability vs. Actual Probability",
+       subtitle = "Bookmaker: PS",
+       x = "Normalized Home Probability - Normalized Away Probability",
+       y = "Results")
+
+PS_without_redcard 
+```
+
+```{r}
+grid.arrange(B365_with_red , BW_with_red, IW_with_red, PS_with_red, B365_without_redcard ,BW_without_redcard ,IW_without_redcard ,PS_without_redcard, nrow = 2)
+```
+
+
+There is no significant change on the bins. We can see that excluding games with red cards, does not change how the bookmakers set the odds for draw games. The bookmakers B365, BW and, PS are still not good at determining bets for the games result with draw and they have odds bias. On the other hand the bookmaker IW is still  successful at setting odds for draw games. 
+
