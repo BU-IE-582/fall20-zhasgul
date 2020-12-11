@@ -4,4 +4,6 @@
 ### **Home Work 0:** RMarkdown (29.10.2020)
 You can reach a few projects that I found interesting from this  [link](example_homework_0.html).
 ### **Home Work 1:** Sports forecasting (20.11.2020)
-You can resch sports forecasting application onEnglish Premier League soccer games from this [link](IE582_HW1_son.html).
+You can reach sports forecasting application onEnglish Premier League soccer games from this [link](IE582_HW1_son.html).
+### **Home Work 2:** Dimensionality reduction for time series data (11.12.2020)
+You can reach my dimensionality reduction application for gesture recognition from this [link](PCA_uWaveGestureLibrary_IE582HW2.html).
