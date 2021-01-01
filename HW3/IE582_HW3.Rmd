@@ -305,7 +305,7 @@ model_lr_hourly
 
 ```
 
-Recall that MAPE value for the lag 168 naïve approach was `r MAPE_lag168`. So when we model all hours data individually, we see that there are `r length(model_lr_hourly[MAPE <= MAPE_lag168,])` models that perform better than the lag 168 naïve approach. In early morning and late evening hours this approach present better MAPE values than the naive approach. This shows that there is hourly seasonality in electricity consumption.
+Recall that MAPE value for the lag 168 naïve approach was `r MAPE_lag168`. So when we model all hours data individually, we see that there are few models that perform better than the lag 168 naïve approach. In early morning and late evening hours this approach present better MAPE values than the naive approach. This shows that there is hourly seasonality in electricity consumption.
 
 However, for most hours MAPE for lag 168 naïve approach is lower. So, our assumption that every hour to have the same coefficient is not that problematic. If this was not the case, we would need to model each hour separately. From here we can interpret that the weekly seasonality is more important than daily seasonality. Hence,  lag 168 naïve approach is still the best performing model.
 
@@ -376,7 +376,7 @@ model_lasso_hourly
 
 ```
 
-Recall that MAPE value for the lag 168 naïve approach was `r MAPE_lag168`. From the table we can see that Lasso regression gives MAPE results than the naïve approach.  So when we model using hourly consumption values of seven and two days ago to predict the next day’s electricity consumption we see that there are `r length(model_lasso_hourly[MAPE <= MAPE_lag168,])` models that perform better than the lag 168 naïve approach. . 
+Recall that MAPE value for the lag 168 naïve approach was `r MAPE_lag168`. From the table we can see that Lasso regression gives MAPE results than the naïve approach.  So when we model using hourly consumption values of seven and two days ago to predict the next day’s electricity consumption we see that there are many hours that perform better than the lag 168 naïve approach. . 
 
 When we investigate the MAPE values for Lasso regression we can see that early morning hours and late evening hours are the best performing models. Both weekly and hourly seasonality should be taken into account in order to deal with the auto-correlation between input variables. And Lasso regression tackles both problems.
 
