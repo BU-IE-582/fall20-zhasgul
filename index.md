@@ -9,3 +9,7 @@ You can reach sports forecasting application onEnglish Premier League soccer gam
 You can reach my dimensionality reduction application for gesture recognition from this [link](PCA_uWaveGestureLibrary_IE582HW2.html).
 ### **Home Work 3:** Penalized Regression Approaches (01.01.2021)
 You can reach my penalized regression application on Turkish electricity consumption data from this [link](IE582_HW3.html).
+### **Home Work 3:** Penalized Regression Approaches (01.01.2021)
+You can reach my penalized regression application on Turkish electricity consumption data from this [link](IE582_HW3.html).
+### **Home Work 4:** Comparing Performance of Models (29.01.2021)
+You can reach my report on performance comparison of the methods; penalized regression, decision trees, and tree-based ensembles from this [link](Son_IE582_HW4_ZH.html).
