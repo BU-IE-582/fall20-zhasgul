@@ -1,0 +1,1297 @@
+---
+title: "Homework 4"
+author: "Zeynep Hasgül"
+date: "29 01 2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: no
+    theme: united
+    highlight: tango
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  word_document:
+    toc: yes
+    toc_depth: '3'
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center", message = FALSE, warning = FALSE, error = FALSE)
+```
+
+
+<style>
+#TOC {
+  color: #708090;
+  font-family: Calibri;
+  font-size: 16px;
+  border-color: #708090;
+  }
+  body {
+    color: #383838;
+    font-family: Calibri;
+    background-color: #F5F5F5;
+  }
+  pre {
+    color: #708090;
+    background-color: #F8F8F8;
+  }
+  h1.title {
+  color: #800000
+  }
+  h4.author {
+  color: #800000
+  }
+  h4.date {
+  color: #800000
+  }
+  </style>
+
+# COMPARING PERFORMANCE OF DIFFERENT MODELS
+
+## 1. INTRODUCTION
+
+The aim of this homework is to compare the performance of penalized regression approaches, decision trees, and tree-based ensembles. These 4 models will be trained on 4 datasets and their performance will be compared based on test errors.
+
+In the assignment _rpart_, _glmnet_, _gbm_, _rattle_, _caret_ , _randomForest_ packages are used for modeling purposes.
+
+```{r packages, message=FALSE, warning=FALSE}
+
+library(knitr)
+library(skimr)
+library(dplyr)
+library(rpart)
+library(rattle)
+library(data.table)
+library(tidyverse)
+library(glmnet)
+library(caret)
+library(randomForest)
+library(gbm)
+library(e1071)
+library(plyr)
+library(smooth)
+library(pROC)
+library(plm)
+
+```
+
+## 2. DATA
+
+Brief information about the chosen datasets and related links can can be found below.
+
+```{r}
+
+airbnb_data <- fread("~/Desktop/IE582_HW4/airbnb.csv")
+forest_data <- fread("~/Desktop/IE582_HW4/forest.csv")
+news_data <- fread("~/Desktop/IE582_HW4/news.csv")
+HR_data <- fread("~/Desktop/IE582_HW4/HR.csv")
+
+```
+
+### Airbnd Dataset
+This dataset contains AirBNB listings in London, UK. There are categorical variables such as property type, room type, location. Also there are binary variable such as availability. And numerical variables such as deposit and cleaning fee.
+
+Task: Regression
+Objective: Predict listing price
+Variables: 42
+
+The data can be downloaded from this [link](https://www.kaggle.com/jinxzed/londonairbnb)
+
+### Forest Dataset
+
+This dataset contains tree observations from four areas of the Roosevelt National Forest in Colorado.  It includes information on tree type, shadow coverage, distance to nearby landmarks, soil type, and local topography and more. All observations are catogarical variables. There are 7 forest cover type from 1 to 7. Given is the attribute name, attribute type, the measurement unit and a brief description. Finding the forest type is the classification problem.
+
+Task: Multi-class Classification
+Objective: Predict forest type
+Variables: 55 
+
+The data can be downloaded from this [link](https://www.kaggle.com/uciml/forest-cover-type-dataset)
+
+
+#### HR Dataset
+
+It is dataset that includes factors that lead to employee turnover.It has binary features such as gender and marital status. It has ordinal features such as education level, hob involvement and job level. It also has some numerical features such as monthly income and age.
+
+Task: Binary classification with class imbalance of ratio 5:1
+Objective: Predict employee turnover
+Variables: 35
+
+ [link](https://www.kaggle.com/pavansubhasht/ibm-hr-analytics-attrition-dataset?select=WA_Fn-UseC_-HR-Employee-Attrition.csv)
+ 
+
+#### News Dataset
+
+This dataset summarizes a set of features about online news published by a media platform. The goal is to predict the number of shares in social networks. The dataset has some categorical and binary features such as "week day is Monday?". It also has numerical features such as number of words. 
+
+Task: Regression
+Objective: Predict popularity
+Variables: 61 (58 predictive attributes, 2 non-predictive, 1 goal field)
+
+The data and explanation of variable names can be found in this [link](https://archive.ics.uci.edu/ml/datasets/Online+News+Popularity)
+
+
+## 3. AIRBNB DATASET
+
+### 3.1 Data Manipulation
+
+Prices are continuous. But according to the histogram it does not look like normally distributed.
+
+```{r}
+hist(airbnb_data$price_x, breaks=2000, xlim=c(0,500))
+
+```
+
+I removed descriptive variables and variables that do not have variance. And I transformed  numerical variables that has unique values less than 10 to caategorical.
+
+```{r}
+
+colnames(airbnb_data) <- make.names(colnames(airbnb_data))
+
+airbnb_data <- airbnb_data   %>% 
+  filter(price_x<500)
+
+
+airbnb_data_drop <- select(airbnb_data, -c("V1","id","host_location","host_since", "street","security_deposit","cleaning_fee","city", "maximum_nights","is_business_travel_ready","requires_license","cancellation_policy","property_type","bed_type"))
+
+airbnb_data_omit <- na.omit(airbnb_data_drop)
+
+airbnb_data_factors <- airbnb_data_omit %>% 
+  select_if(~n_distinct(.) <= 10)
+
+
+airbnb_data_fix <- airbnb_data_omit %>% 
+  mutate_at(c("experiences_offered" , "host_is_superhost","host_has_profile_pic", "host_identity_verified", "is_location_exact","room_type_y" , "instant_bookable", "require_guest_profile_picture", "require_guest_phone_verification" ), factor)
+
+
+
+skim(airbnb_data_fix)
+str(airbnb_data_fix)
+
+
+```
+
+
+
+
+In this step I split my dataset in to training and test groups. While doing that I leave 70% in training set and 30% in the test set.
+
+```{r}
+
+airbnb_data_omit2 <- na.omit(airbnb_data_fix)
+
+airbnb_data_omit2 = airbnb_data_omit2[sample(nrow(airbnb_data_omit2), 4000), ]
+
+
+set.seed(123)
+
+split_airbnb <- createDataPartition(airbnb_data_omit2$`price_x`, p = .7, 
+                                     list = FALSE, 
+                                     times = 1)
+
+airbnb_train <- airbnb_data_omit2[split_airbnb,]
+airbnb_test <- airbnb_data_omit2[-split_airbnb,]
+
+```
+
+
+
+
+### 3.2 Penalized Regression Approaches  
+
+
+
+```{r}
+airbnb_train_matrix <-  data.matrix(airbnb_train[,-c("price_x")])
+airbnb_test_matrix <-  data.matrix(airbnb_test[,-c("price_x")])
+airbnb_target_train <- data.matrix(airbnb_train$price_x)
+
+airbnb_PRA_cv = cv.glmnet(airbnb_train_matrix, airbnb_target_train , family="gaussian")
+
+plot(airbnb_PRA_cv)
+
+airbnb_lambda_min = airbnb_PRA_cv$lambda.min
+airbnb_lambda_min
+airbnb_lambda_1se = airbnb_PRA_cv$lambda.1se
+airbnb_lambda_1se
+
+```
+
+
+
+
+
+I saw that there in no great difference in complexity with min lambda and 1se lambda so, I decided to use min lambda to build the model.
+
+```{r}
+
+airbnb_PRA <- glmnet(airbnb_train_matrix, as.matrix(airbnb_train$price_x), family="gaussian", alpha=1, lambda= airbnb_PRA_cv$lambda.1se)
+
+summary(airbnb_PRA)
+
+
+```
+
+
+
+### 3.2 Decision Tree
+
+```{r}
+
+
+airbnb_tune_grid = expand.grid(min_leaf_obs=seq(2,5,1),complexity=seq(0,0.03,0.01)) 
+
+
+folds <- createFolds(1:nrow(airbnb_train), k = 10)
+airbnb_cv_data = airbnb_train
+
+airbnb_cv_param = tibble()
+airbnb_all_cv_stat = data.table()
+
+set.seed(123)
+for(p in 1:nrow(airbnb_tune_grid)) {
+  airbnb_temp_param = airbnb_tune_grid[p,]
+  airbnb_temp_result = tibble()
+  for(i in 1:10){
+    airbnb_temp_test = airbnb_cv_data[folds[[i]],]
+    airbnb_temp_train = airbnb_cv_data[-folds[[i]],]
+    airbnb_temp_fit=rpart(price_x~.,data = airbnb_temp_train, method="anova", control = rpart.control(minbucket = airbnb_temp_param$min_leaf_obs,cp=airbnb_temp_param$complexity))
+    airbnb_temp_test$Prediction = predict(airbnb_temp_fit,airbnb_temp_test)
+    airbnb_temp_result=rbind(airbnb_temp_result,airbnb_temp_test)
+  }
+  airbnb_temp_stat = data.table(airbnb_temp_param, Accuracy= sum (airbnb_temp_test$Prediction==airbnb_temp_test$price_x)/nrow(airbnb_temp_test))
+  print(airbnb_temp_stat)
+  airbnb_all_cv_stat = rbind(airbnb_all_cv_stat, airbnb_temp_stat)
+}
+    
+```
+
+According to the cross validation results the best accuracy was obtained with the following parameters.
+
+```{r}
+
+airbnb_best_DT = airbnb_all_cv_stat%>%arrange(-Accuracy)%>%head(1)
+airbnb_best_DT
+
+```
+
+Then I use these parameters that perform best for building the CART tree. 
+
+```{r}
+
+
+airbnb_DT = rpart(price_x~.,data = airbnb_train, method="anova",control = rpart.control(minbucket = airbnb_best_DT$min_leaf_obs,cp=airbnb_best_DT$complexity))
+
+fancyRpartPlot(airbnb_DT)
+
+```
+A very complex tree was built there may be overfitting.
+
+### 3.3 Random Forests 
+
+For RF we set only m (set other parameters as J=500 and the minimal number of observations per tree leaf=5)
+
+For mtry square root of features are taken generally. As there are 30 variables I am doing cross validation for 5, 6 and 7.
+
+```{r}
+
+set.seed(123)
+airbnb_m=c(5,6,7)
+J=500 
+min_size_of_terminal_nodes=5
+n_folds=10
+
+airbnb_RF_fitControl=trainControl(method = "repeatedcv",
+                           number = n_folds,
+                           repeats = 1, search="random")  
+
+airbnb_RF_grid=expand.grid(mtry = airbnb_m)
+
+airbnb_RF_train <- train(price_x~., data = airbnb_train, method = "rf", trControl = airbnb_RF_fitControl, ntree=J, nodesize = min_size_of_terminal_nodes, tuneGrid = airbnb_RF_grid)
+
+print(airbnb_RF_train[["results"]])
+
+```
+
+
+### 3.4 Stochastic Gradient Boosting
+
+
+```{r}
+
+set.seed(123)
+
+airbnb_GBM_control <- trainControl(method='cv',  number=5,  search='grid')
+
+
+airbnb_GBM_grid <-  expand.grid(interaction.depth = c(2, 3, 5),  n.trees = c(50,100),  shrinkage = c(0.05,0.1), n.minobsinnode = 10)
+
+
+print(airbnb_GBM_grid)
+
+```
+
+```{r}
+
+set.seed(123)
+airbnb_GBM_train <- train(price_x~., 
+                 data = airbnb_train,
+                 method = 'gbm',
+                 metric = 'RMSE',
+                 trControl=airbnb_GBM_control,
+                 tuneGrid = airbnb_GBM_grid, 
+                 verbose=FALSE)
+
+print(airbnb_GBM_train)
+
+```
+
+
+```{r}
+
+summary(airbnb_GBM_train)
+
+```
+
+### 3.5 Comparison
+
+```{r}
+
+airbnb_PRA_predictions_train <- predict(airbnb_PRA_cv, airbnb_train_matrix, s='lambda.1se')
+airbnb_PRA_predictions_test <- predict(airbnb_PRA_cv, airbnb_test_matrix, s='lambda.1se')
+
+airbnb_PRA_Rsquared_train <- cor(airbnb_PRA_predictions_train, airbnb_train$price_x) ^ 2
+airbnb_PRA_Rsquared_test <- cor(airbnb_PRA_predictions_test, airbnb_test$price_x) ^ 2
+
+
+airbnb_DT_predictions_train <- predict(airbnb_DT, airbnb_train[,-c("price_x")], type="vector")
+airbnb_DT_predictions_test <- predict(airbnb_DT, airbnb_test[,-c("price_x")], type="vector")
+
+airbnb_DT_Rsquared_train <- cor(airbnb_DT_predictions_train, airbnb_train$price_x) ^ 2
+airbnb_DT_Rsquared_test <- cor(airbnb_DT_predictions_test, airbnb_test$price_x) ^ 2
+
+
+airbnb_RF_predictions_train  <- predict(airbnb_RF_train, airbnb_train, type="raw")
+airbnb_RF_predictions_test  <- predict(airbnb_RF_train, airbnb_test, type="raw")
+
+airbnb_RF_Rsquared_train <- cor(airbnb_RF_predictions_train , airbnb_train$price_x) ^ 2
+airbnb_RF_Rsquared_test <- cor(airbnb_RF_predictions_test, airbnb_test$price_x) ^ 2
+
+
+airbnb_SGB_predictions_train <- predict(airbnb_GBM_train, airbnb_train, type="raw")
+airbnb_SGB_predictions_test <- predict(airbnb_GBM_train, airbnb_test, type="raw")
+
+airbnb_SGB_Rsquared_train <- cor(airbnb_SGB_predictions_train , airbnb_train$price_x) ^ 2
+airbnb_SGB_Rsquared_test <- cor(airbnb_SGB_predictions_test, airbnb_test$price_x) ^ 2
+
+airbnb_test_performances <- data.table(airbnb_PRA=airbnb_PRA_Rsquared_test, airbnb_DT_Rsquared_test, airbnb_RF_Rsquared_test, airbnb_SGB_Rsquared_test)
+
+airbnb_train_performances <- data.table(airbnb_PRA=airbnb_PRA_Rsquared_train, airbnb_DT_Rsquared_train, airbnb_RF_Rsquared_train, airbnb_SGB_Rsquared_train)
+
+airbnb_test_performances
+airbnb_train_performances
+
+
+```
+
+- Overall, r squared values are low for each method.
+- Random forest has highest r squared value. But there is a great variation with test and train performance. Therefore SGB is a better model for this data set.
+- Decision tree performed worst on the test data. There is a big difference on test and train data. This shows overfitting.
+- I expected penalized regresion approach to work well for this data because target is continuos. And with tree based approaches this can be a problem. Non the less PRA performed bad. This may be result of non linear realations. Linearity assumtions are probably not fulfilled. Because when I checked the histogram of airbnb house prices the distribution looked more like poisson distribution.
+
+
+
+## 4. FOREST DATASET
+
+### 4.1 Data Manipulation
+
+While I was exploring the data I saw that all variables were 
+
+```{r}
+colnames(forest_data) <- make.names(colnames(forest_data))
+
+forest_data_factors <- forest_data %>% 
+  select(11:54)
+
+forest_factors_names <- colnames(forest_data_factors)
+forest_factors_names
+
+forest_data_fix <- forest_data %>% 
+  mutate_at(c("Wilderness_Area1", "Wilderness_Area2", "Wilderness_Area3" ,"Wilderness_Area4" ,"Soil_Type1", "Soil_Type2",      "Soil_Type3",  "Soil_Type4",  "Soil_Type5", "Soil_Type6", "Soil_Type7",  "Soil_Type8" , "Soil_Type9",  "Soil_Type10" ,     "Soil_Type11", "Soil_Type12", "Soil_Type13"  ,"Soil_Type14", "Soil_Type15" ,  "Soil_Type16"  , "Soil_Type17",  "Soil_Type18", "Soil_Type19",  "Soil_Type20" ,  "Soil_Type21",  "Soil_Type22"  , "Soil_Type23"   ,"Soil_Type24",  "Soil_Type25",   "Soil_Type26" ,  "Soil_Type27" , "Soil_Type28"   ,"Soil_Type29",    "Soil_Type30", "Soil_Type31", "Soil_Type32", "Soil_Type33",    "Soil_Type34",    "Soil_Type35",  "Soil_Type36", "Soil_Type37"  ,    "Soil_Type38", "Soil_Type39", "Soil_Type40", "Cover_Type"), factor)
+
+str(forest_data_fix)  
+  
+skim(forest_data_fix)
+
+table(forest_data_fix$Cover_Type)
+
+```
+
+When I checked the data with skimr() and str() I saw that there are no missing values. Also after transforming dummy encodings from numerical to factor data is cleaned.
+
+
+There are over 500.000 observations in my data set it was taking too long to builds models so I have sampled 4000 from it. After the sampling I seperated 70% of the data for train and 30% for testing. 
+
+```{r}
+
+
+forest_data_omit <- na.omit(forest_data_fix)
+
+forest_data_omit = forest_data_omit[sample(nrow(forest_data_omit), 4000), ]
+
+set.seed(12345)
+split_forest <- createDataPartition(forest_data_omit$`Cover_Type`, p = .7, 
+                                     list = FALSE, 
+                                     times = 1)
+
+forest_train <- forest_data_omit[split_forest,]
+forest_test <- forest_data_omit[-split_forest,]
+```
+
+
+
+### 4.2 Penalized Regression
+
+In penalized regression approach we need to do standardization. But our data has some dummy encodings. And when we take them to [-3, 3] range it doesn't really make sense. So, I only applied standardization to numerical values. There will be still a little difference in scaling but it will be a lot better than what we started with. I have standardized the test and train data to be used in the penalized regression approach. In tree based approaches we do not need to use the standardized versions. 
+
+```{r}
+
+forest_train_standard <- forest_train %>% 
+    mutate_if(is.integer, scale)
+
+forest_test_standard <- forest_test %>% 
+    mutate_if(is.integer, scale)
+
+```
+
+```{r}
+
+forest_train_matrix = matrix()
+forest_test_matrix = matrix()
+forest_target = matrix()
+
+forest_train_matrix <-  data.matrix(forest_train_standard[,-c("Cover_Type")])
+forest_test_matrix <-  data.matrix(forest_test_standard[,-c("Cover_Type")])
+forest_target <- data.matrix(forest_train_standard$Cover_Type)
+
+set.seed(123)
+forest_PRA_cv = cv.glmnet(forest_train_matrix, forest_target, family="multinomial", nfolds=10)
+
+
+forest_lambda_min = forest_PRA_cv$lambda.min
+forest_lambda_min
+forest_lambda_1se = forest_PRA_cv$lambda.1se
+forest_lambda_1se
+
+plot(forest_PRA_cv)
+```
+
+I saw that there in no great difference in complexity with min lambda and 1se lambda so, I decided to use min lambda to build the model.
+
+
+
+
+
+### 4.3 Decision Trees
+
+
+Using 10 fold cross validation
+
+```{r}
+
+
+forest_tune_grid = expand.grid(min_leaf_obs=seq(5,15,1),complexity=seq(0,0.3,0.1)) 
+
+
+folds <- createFolds(1:nrow(forest_train), k = 10)
+forest_cv_data = forest_train
+
+forest_cv_param = tibble()
+forest_all_cv_stat = data.table()
+
+set.seed(123)
+for(p in 1:nrow(forest_tune_grid)) {
+  forest_temp_param = forest_tune_grid[p,]
+  forest_temp_result = tibble()
+  for(i in 1:10){
+    forest_temp_test = forest_cv_data[folds[[i]],]
+    forest_temp_train = forest_cv_data[-folds[[i]],]
+    forest_temp_fit=rpart(Cover_Type~.,data = forest_temp_train, method="class", control = rpart.control(minbucket = forest_temp_param$min_leaf_obs,cp=forest_temp_param$complexity))
+    forest_temp_test$Prediction = predict(forest_temp_fit,forest_temp_test,type="class")
+    forest_temp_result=rbind(forest_temp_result,forest_temp_test)
+  }
+  forest_temp_stat = data.table(forest_temp_param, Accuracy= sum (forest_temp_test$Prediction==forest_temp_test$Cover_Type)/nrow(forest_temp_test))
+  print(forest_temp_stat)
+  forest_all_cv_stat = rbind(forest_all_cv_stat, forest_temp_stat)
+}
+    
+```
+
+According to the cross validation results the best accuracy was obtained with the following parameters.
+
+```{r}
+
+forest_best_DT = forest_all_cv_stat%>%arrange(-Accuracy)%>%head(1)
+forest_best_DT
+
+```
+
+Then I use these parameters that perform best for building the CART tree. 
+
+```{r}
+
+
+forest_DT = rpart(Cover_Type~.,data = forest_train, method="class",control = rpart.control(minbucket = forest_best_DT$min_leaf_obs,cp=forest_best_DT$complexity))
+
+fancyRpartPlot(forest_DT)
+
+```
+As we can see that the tree generated is not too complex.
+
+
+### 4.4 Random Forests 
+
+For RF we set only m (set other parameters as J=500 and the minimal number of observations per tree leaf=5)
+
+For mtry square root of features are taken generally. As there are 55 variables I am doing cross validation for 7, 8 and 9.
+
+```{r}
+
+set.seed(123)
+forest_m=c(7,8,9)
+J=500 
+min_size_of_terminal_nodes=5
+n_folds=10
+
+forest_RF_fitControl=trainControl(method = "repeatedcv",
+                           number = n_folds,
+                           repeats = 1, classProbs = TRUE, search="random")  
+
+forest_RF_grid=expand.grid(mtry = forest_m)
+
+forest_RF_train <- train(make.names(as.factor(Cover_Type)) ~ ., data = forest_train, method = "rf", trControl = forest_RF_fitControl, ntree=J, nodesize = min_size_of_terminal_nodes, tuneGrid = forest_RF_grid)
+
+print(forest_RF_train[["results"]])
+
+
+```
+
+### 4.5 Stochastic Gradient Boosting
+
+```{r}
+
+set.seed(123)
+forest_GBM_Control <- trainControl(method='cv', 
+                        number=5, 
+                        search='grid')
+
+forest_GBM_Grid <-  expand.grid(interaction.depth = c(2, 3, 5),
+                         n.trees = c(50,100), 
+                         shrinkage = c(0.05, 0.1),
+                         n.minobsinnode = 10)
+
+print(forest_GBM_Grid)
+```
+
+```{r}
+
+
+forest_GBM_train <- train(Cover_Type ~ ., 
+                 data =forest_train,
+                 method = 'gbm',
+                 metric = 'Accuracy',
+                 trControl=forest_GBM_Control,
+                 tuneGrid = forest_GBM_Grid,
+                 verbose=FALSE)
+
+print(forest_GBM_train)
+
+summary(forest_GBM_train)
+
+```
+
+
+
+
+### 4.6 Comparison
+
+
+```{r}
+  
+prediction_forest_PRA_test <- predict(forest_PRA_cv, newx=forest_test_matrix, s=c("lambda.min"), type="class")
+prediction_forest_PRA_train <-  predict(forest_PRA_cv, newx=forest_train_matrix, s=c("lambda.min"), type="class")
+
+cm_forest_PRA_test <- confusionMatrix(factor(prediction_forest_PRA_test), factor(forest_test$Cover_Type))
+cm_forest_PRA_train <- confusionMatrix(factor(prediction_forest_PRA_train), factor(forest_train$Cover_Type))
+
+
+prediction_forest_DT_test <- predict(forest_DT, forest_test, type="class")
+prediction_forest_DT_train <- predict(forest_DT, forest_train, type="class")
+
+cm_forest_DT_test <- confusionMatrix(factor(prediction_forest_DT_test), factor(forest_test$Cover_Type))
+cm_forest_DT_train <- confusionMatrix(factor(prediction_forest_DT_train), factor(forest_train$Cover_Type))
+
+
+prediction_forest_RF_test <- predict(forest_RF_train, forest_test, type="raw")
+prediction_forest_RF_train <- predict(forest_RF_train, forest_train, type="raw")
+
+cm_forest_RF_test <- confusionMatrix(factor(prediction_forest_RF_test), factor(make.names(forest_test$Cover_Type)))
+cm_forest_RF_train <- confusionMatrix(factor(prediction_forest_RF_train), factor(make.names(forest_train$Cover_Type)))
+
+
+prediction_forest_SGB_test <- predict(forest_GBM_train, forest_test, type="raw")
+prediction_forest_SGB_train <- predict(forest_GBM_train, forest_train, type="raw")
+
+cm_forest_SGB_test <- confusionMatrix(factor(make.names(prediction_forest_SGB_test)), factor(make.names(forest_test$Cover_Type)))
+cm_forest_SGB_train <- confusionMatrix(factor(make.names(prediction_forest_SGB_train)), factor(make.names(forest_train$Cover_Type)))
+
+
+forest_test_performances <- data.table(PRA_test=cm_forest_PRA_test$overall["Accuracy"], DT_test=cm_forest_DT_test$overall["Accuracy"], RF_test=cm_forest_RF_test$overall["Accuracy"], SGB_test=cm_forest_SGB_test$overall["Accuracy"])
+
+forest_train_performances <- data.table(PRA_train=cm_forest_PRA_train$overall["Accuracy"], DT_train=cm_forest_DT_train$overall["Accuracy"], RF_train=cm_forest_RF_train$overall["Accuracy"], SGB_train=cm_forest_SGB_train$overall["Accuracy"])
+
+forest_test_performances
+forest_train_performances
+
+```
+
+
+
+- Overall all methods performed well on this dataset even though there were over 50 features.
+- Best performing method was Random Forest.
+- Tree based approaches performed  really well in train data set. But there are big differences with test and train performance. This may be due to overfitting.
+- Penalized regression performed worst. There may be nonlinearity in the data.
+- But test and train accuracy is very close to each other it shows a balance with variance bias trade off.
+- Elevation is found important in all models and it used in a lot for splits in tree based approaches.There maybe a  high cardinally issue there.
+
+
+    
+
+## 5. HR DATASET
+
+### 5.1 Data Manipulation
+
+HR data set is a binary dataset and it has 5:1 class imbalance 
+
+```{r}
+
+ggplot(HR_data, aes(x=Attrition )) + geom_bar()
+
+```
+
+When I checked my data with lapply(HR_data, unique) I saw that EmployeeCount, Over18, StandardHours variables had only one unique value. As there is no variation in those features I can remove them.
+
+
+```{r}
+
+
+colnames(HR_data) <- make.names(colnames(HR_data))
+
+HR_data<- HR_data %>% 
+    mutate_if(is.character, factor)
+
+HR_data_drop <- select(HR_data, -c("EmployeeCount", "Over18", "StandardHours"))
+
+
+```
+
+
+When I was exploring the data I saw that some categorical variables stored as integer even though there were only 2-3 type of levels in them. So, I filtered those variables and transformed them to factors.
+
+```{r}
+
+HR_data_factors <- HR_data_drop %>% 
+  select_if(~n_distinct(.) <= 9)
+
+colnames(HR_data_factors)
+
+HR_data_factors_fix  <- HR_data_factors  %>% 
+  select_if(is.integer)
+
+HR_data_fix <- HR_data_drop %>% 
+  mutate_at(c( "Education", "EnvironmentSatisfaction", "JobInvolvement", "JobLevel", "JobSatisfaction", "PerformanceRating", "RelationshipSatisfaction", "StockOptionLevel", "TrainingTimesLastYear", "WorkLifeBalance"), factor)
+
+str(HR_data_fix)
+skim(HR_data_fix)
+
+
+```
+
+```{r}
+
+HR_data_omit <- na.omit(HR_data_fix)
+
+
+set.seed(123)
+split_HR <- createDataPartition(HR_data_omit$`Attrition`, p = .7, 
+                                     list = FALSE, 
+                                     times = 1)
+
+HR_train <- HR_data_omit[split_HR,]
+HR_test <- HR_data_omit[-split_HR,]
+
+```
+
+
+
+### 5.2 Penalized Regression Approaches
+
+In penalized regression approach we need to do standardization. But our data has some binary variables. So, I only applied standardization to numerical values. I have standardized the test and train data to be used in the penalized regression approach. In tree based approaches we do not need to use the standardized versions. 
+
+```{r}
+
+HR_train_standard <- HR_train %>% 
+    mutate_if(is.numeric, scale)
+
+HR_test_standard <- HR_test %>% 
+    mutate_if(is.numeric, scale)
+
+```
+
+
+```{r}
+
+HR_train_matrix = matrix()
+HR_test_matrix = matrix()
+HR_target = matrix()
+
+HR_train_matrix <-  data.matrix(HR_train_standard[,-c("Attrition")])
+HR_test_matrix <-  data.matrix(HR_test_standard[,-c("Attrition")])
+
+HR_target <- data.matrix (HR_train_standard$Attrition)
+HR_target_test <- data.matrix (HR_test_standard$Attrition)
+
+set.seed(123)
+HR_PRA_cv = cv.glmnet(HR_train_matrix, HR_target, family="binomial", nfolds=5)
+
+
+plot(HR_PRA_cv)
+
+HR_lambda_min = HR_PRA_cv$lambda.min
+HR_lambda_min
+HR_lambda_1se = HR_PRA_cv$lambda.1se
+HR_lambda_1se
+
+```
+
+
+
+```{r}
+
+HR_PRA <- glmnet(HR_train_matrix, HR_target,family="binomial", alpha=1,lambda=HR_PRA_cv$lambda.min)
+summary(HR_PRA)
+
+```
+
+
+### 5.3 Decision Trees
+
+
+Using 10 fold cross validation
+
+```{r}
+
+
+HR_tune_grid = expand.grid(min_leaf_obs=seq(3,10,1),complexity=seq(0,0.3,0.1)) 
+
+
+HR_folds <- createFolds(1:nrow(HR_train), k = 10)
+HR_cv_data = HR_train
+
+HR_cv_param = tibble()
+HR_all_cv_stat = data.table()
+
+for(p in 1:nrow(HR_tune_grid)) {
+  HR_temp_param = HR_tune_grid[p,]
+  HR_temp_result = tibble()
+  for(i in 1:10){
+    HR_temp_test = HR_cv_data[HR_folds[[i]],]
+    HR_temp_train = HR_cv_data[-HR_folds[[i]],]
+    HR_temp_fit=rpart(Attrition~.,data = HR_temp_train, method="class", control = rpart.control(minbucket = HR_temp_param$min_leaf_obs,cp=HR_temp_param$complexity))
+    HR_temp_test$Prediction = predict(HR_temp_fit, HR_temp_test, type="class")
+    HR_temp_result=rbind( HR_temp_result, HR_temp_test)
+  }
+  HR_temp_stat = data.table(HR_temp_param, Accuracy= sum (HR_temp_test$Prediction==HR_temp_test$Attrition)/nrow(HR_temp_test))
+  print(HR_temp_stat)
+  HR_all_cv_stat = rbind(HR_all_cv_stat, HR_temp_stat)
+}
+    
+```
+
+According to the cross validation results the best accuracy was obtained with the following parameters.
+
+```{r}
+
+HR_best_DT = HR_all_cv_stat%>%arrange(-Accuracy)%>%head(1)
+HR_best_DT
+
+```
+
+Then I use these parameters that perform best for building the CART tree. 
+
+```{r}
+
+
+HR_DT = rpart(Attrition~. , data = HR_train, method="class", control = rpart.control(minbucket = HR_best_DT$min_leaf_obs,cp=HR_best_DT$complexity))
+
+
+fancyRpartPlot(HR_DT)
+
+```
+As we can see that the tree generated is not too complex.
+
+
+
+### 5.4 Random Forests 
+
+For RF we set only m (set other parameters as J=500 and the minimal number of observations per tree leaf=5)
+
+For mtry square root of features are taken generally. As there are 32 variables I am doing cross validation for 5, 6 and 7.
+
+```{r}
+
+set.seed(123)
+HR_m=c(5,6,7)
+J=500 
+min_size_of_terminal_nodes=5
+n_folds=10
+
+HR_RF_fitControl=trainControl(method = "repeatedcv",
+                           number = n_folds,
+                           repeats = 1, classProbs = TRUE, search="random")  
+
+HR_RF_grid=expand.grid(mtry = HR_m)
+
+HR_RF_train <- train(Attrition~., data = HR_train, method = "rf", trControl = HR_RF_fitControl, ntree=J, nodesize = min_size_of_terminal_nodes, tuneGrid = HR_RF_grid)
+
+print(HR_RF_train[["results"]])
+
+```
+
+### 5.5 Stochastic Gradient Boosting
+
+
+```{r}
+
+set.seed(123)
+
+HR_GBM_control <- trainControl(method='cv',  number=5,  search='grid', summaryFunction = twoClassSummary, classProbs = T)
+
+
+HR_GBM_grid <-  expand.grid(interaction.depth = c(2, 3, 5),  n.trees = c(50,100),  shrinkage = c(0.05,0.1), n.minobsinnode = 10)
+
+
+
+print(HR_GBM_grid)
+
+```
+
+```{r}
+
+set.seed(123)
+HR_GBM_train <- train(Attrition~., 
+                 data = HR_train,
+                 method = 'gbm',
+                 metric = 'ROC',
+                 trControl=HR_GBM_control,
+                 tuneGrid = HR_GBM_grid,
+                 verbose=FALSE)
+
+print(HR_GBM_train)
+
+
+```
+
+
+```{r}
+
+
+summary(HR_GBM_train)
+
+```
+
+### 5.6 Comparison
+
+```{r}
+
+prediction_HR_PRA_test <- predict(HR_PRA, newx=HR_test_matrix, s=c("lambda.min"), type="class")
+prediction_HR_PRA_train <-  predict(HR_PRA, newx=HR_train_matrix, s=c("lambda.min"), type="class")
+
+cm_HR_PRA_test <- confusionMatrix(factor(prediction_HR_PRA_test), factor(HR_test$Attrition))
+cm_HR_PRA_train <- confusionMatrix(factor(prediction_HR_PRA_train), factor(HR_train$Attrition))
+
+
+prediction_HR_DT_test <- predict(HR_DT, HR_test, type="class")
+prediction_HR_DT_train <- predict(HR_DT, HR_train, type="class")
+
+cm_HR_DT_test <- confusionMatrix(factor(prediction_HR_DT_test), factor(HR_test$Attrition))
+cm_HR_DT_train <- confusionMatrix(factor(prediction_HR_DT_train), factor(HR_train$Attrition))
+
+
+prediction_HR_RF_test <- predict(HR_RF_train, HR_test, type="raw")
+prediction_HR_RF_train <- predict(HR_RF_train, HR_train, type="raw")
+
+cm_HR_RF_test <- confusionMatrix(factor(make.names(prediction_HR_RF_test)), factor(make.names(HR_test$Attrition)))
+cm_HR_RF_train <- confusionMatrix(factor(make.names(prediction_HR_RF_train)), factor(make.names(HR_train$Attrition)))
+
+
+prediction_HR_SGB_test <- predict(HR_GBM_train, HR_test, type="raw")
+prediction_HR_SGB_train <- predict(HR_GBM_train, HR_train, type="raw")
+
+cm_HR_SGB_test <- confusionMatrix(factor(make.names(prediction_HR_SGB_test)), factor(make.names(HR_test$Attrition)))
+cm_HR_SGB_train <- confusionMatrix(factor(make.names(prediction_HR_SGB_train)), factor(make.names(HR_train$Attrition)))
+
+
+
+HR_test_performances <- data.table(HR_PRA=cm_HR_PRA_test$overall["Accuracy"], HR_DT=cm_HR_DT_test$overall["Accuracy"], HR_RF=cm_HR_RF_test$overall["Accuracy"], HR_SGB=cm_HR_SGB_test$overall["Accuracy"])
+
+HR_train_performances <- data.table(HR_PRA=cm_HR_PRA_train$overall["Accuracy"], HR_DT=cm_HR_DT_train$overall["Accuracy"], HR_RF=cm_HR_RF_train$overall["Accuracy"], HR_SGB=cm_HR_SGB_train$overall["Accuracy"])
+
+HR_test_performances 
+HR_train_performances 
+
+```
+
+
+
+- The cross-validation error rate of different approaches are consistent with the test error rate.
+- Overall all methods performed well on this data as there were not too many features.
+- Best performing method was random forest in train data penalized regression in the test data.
+- Decision trees are known to create bias if there is class imbalance. In this data there was 5:1 class imbalance. That may be the reason why penalized regression worked better. Nonetheless, decision tree methods performed well.
+- Monthly salary is found important and used a lot for splits in tree based approaches as there may be a high cardinally issue there. This maybe another reason for the difference between test and train accuracy in tree based methods.
+- As penalized regression worked so well in this data set relationship in the data may be rather linear.
+- Among tree based methods SGB performed the best.
+
+
+
+## 6. NEWS DATASET
+
+### 6.1 Data Manipulation
+
+First column gives the url of the online news. This columns is present only for descriptive purposes. To make a prediction I will drop this column since it is unnecessary.
+Also some other variables were found to have no variation. Or they were highly correlated. For example number of key words information is already available in the data set. Adding related features like average, min or max is not very meaningful. So, I removed those to clean the data.
+
+```{r}
+news_data_drop <- select(news_data, -c("url", "timedelta", "n_non_stop_words", "kw_avg_max", "kw_avg_max" ,"kw_min_min", "kw_max_min","kw_avg_min", "kw_min_max", "kw_max_max", "kw_avg_max","kw_min_avg", "kw_max_avg", "kw_max_avg", "kw_avg_avg", "min_positive_polarity","max_positive_polarity","min_negative_polarity", "max_negative_polarity" ))
+
+
+```
+
+
+When I was exploring the  data set I saw that all variables, even binary ones were stored as numeric. So I filtered and mutated variables that have unique values less than 5 as factor.
+
+```{r}
+
+news_data_factors <- news_data_drop %>% 
+  select_if(~n_distinct(.) <= 5)
+
+colnames(news_data_factors)
+
+
+news_data_fix <- news_data_drop %>% 
+  mutate_at(c("data_channel_is_lifestyle", "data_channel_is_entertainment", "data_channel_is_bus",    "data_channel_is_socmed","data_channel_is_tech","data_channel_is_world","weekday_is_monday","weekday_is_tuesday","weekday_is_wednesday", "weekday_is_thursday","weekday_is_friday","weekday_is_saturday", "weekday_is_sunday", "is_weekend"), factor)
+
+
+
+```
+
+When I checked the data with skimr() and str() I saw that there are no missing values. Also after transforming dummy encodings from numerical to factor data is cleaned.
+
+
+
+```{r}
+median_shares<-median(news_data$shares)
+
+news_data_binary <- news_data_fix %>%
+  mutate(is_popular=as.numeric(shares> median_shares))
+
+news_data_binary2 <- news_data_binary %>% 
+  mutate_at(c("is_popular"), factor)
+
+str(news_data_binary2)
+skim(news_data_binary2)
+
+```
+
+
+The popularity is continuous target variable in the original dataset as it can be seen histogram. But I split it from the median value and modeled as binary classification. Because there were a lot of binary dummy encoding and there very too many features. Modeling it as regression did not work well. As it can be seen from the barplot there is no class imbalance.
+
+```{r}
+
+hist(news_data$shares, breaks=2000, xlim=c(0,15000))
+ggplot(news_data_binary2, aes(is_popular)) + geom_bar()
+
+```
+
+
+There are over 40.000 observations in the news dataset it was taking too long to builds models so I have sampled 4000 observations from it. After the sampling I seperated 70% of the data for train and 30% for testing. 
+
+```{r}
+
+news_data_omit <- na.omit(news_data_binary2)
+
+news_data_omit2 <- select(news_data_omit, -c("shares"))
+
+news_data_omit2 = news_data_omit2[sample(nrow(news_data_omit2), 4000), ]
+
+set.seed(123)
+split_news <- createDataPartition(news_data_omit2$`is_popular`, p = .7, 
+                                     list = FALSE, 
+                                     times = 1)
+
+news_train <- news_data_omit2[split_news,]
+news_test <- news_data_omit2[-split_news,]
+
+```
+
+
+
+### 6.2 Penalized Regression Approaches  
+
+In penalized regression approach we need to do standardization. But our data has some binary variables. So, I only applied standardization to numerical values. I have standardized the test and train data to be used in the penalized regression approach. In tree based approaches we do not need to use the standardized versions. 
+
+```{r}
+
+news_train_standard <- news_train %>% 
+    mutate_if(is.numeric, scale)
+
+news_test_standard <- news_test %>% 
+    mutate_if(is.numeric, scale)
+
+```
+
+
+```{r}
+
+news_train_matrix = matrix()
+news_test_matrix = matrix()
+news_target = matrix()
+
+news_target_train <- data.matrix(news_train_standard$is_popular)
+news_target_test <- data.matrix(news_test_standard$is_popular)
+
+news_train_matrix <-  data.matrix(news_train_standard[,-c("is_popular")])
+news_test_matrix <-  data.matrix(news_test_standard[,-c("is_popular")])
+
+
+
+news_PRA_cv = cv.glmnet(news_train_matrix, news_target_train, family="binomial")
+options(repr.plot.width=5, repr.plot.height=5)
+
+plot(news_PRA_cv)
+
+news_lambda_min = news_PRA_cv$lambda.min
+news_lambda_min
+news_lambda_1se = news_PRA_cv$lambda.1se
+news_lambda_1se
+
+```
+
+
+
+```{r}
+
+news_PRA <- glmnet(news_train_matrix, news_target_train ,family="binomial", alpha=1,lambda=news_PRA_cv$lambda.min)
+summary(news_PRA)
+
+
+
+```
+
+Now we can calculate accuracy for train and test data using sum of squared errors. 
+
+
+
+### 6.3 Decision Trees
+
+
+```{r}
+
+
+news_tune_grid = expand.grid(min_leaf_obs=seq(3,10,1),complexity=seq(0,0.3,0.1)) 
+
+
+news_folds <- createFolds(1:nrow(news_train), k = 10)
+news_cv_data = news_train
+
+news_cv_param = tibble()
+news_all_cv_stat = data.table()
+
+for(p in 1:nrow(news_tune_grid)) {
+  news_temp_param = news_tune_grid[p,]
+  news_temp_result = tibble()
+  for(i in 1:10){
+    news_temp_test = news_cv_data[news_folds[[i]],]
+    news_temp_train = news_cv_data[-news_folds[[i]],]
+    news_temp_fit=rpart(is_popular~.,data = news_temp_train, method="class", control = rpart.control(minbucket = news_temp_param$min_leaf_obs,cp=news_temp_param$complexity))
+    news_temp_test$Prediction = predict(news_temp_fit, news_temp_test, type="class")
+    news_temp_result=rbind( news_temp_result, news_temp_test)
+  }
+  news_temp_stat = data.table(news_temp_param, Accuracy= sum (news_temp_test$Prediction==news_temp_test$is_popular)/nrow(news_temp_test))
+  print(news_temp_stat)
+  news_all_cv_stat = rbind(news_all_cv_stat, news_temp_stat)
+}
+    
+```
+    
+
+
+```{r}
+
+news_best_DT = news_all_cv_stat%>%arrange(-Accuracy) %>% head(1)
+news_best_DT
+
+```
+
+Then I use these parameters that perform best for building the CART tree. 
+
+```{r}
+
+news_DT = rpart(is_popular~.,data = news_train, method="class",control = rpart.control(minbucket = news_best_DT$min_leaf_obs,cp=news_best_DT$complexity))
+
+fancyRpartPlot(news_DT)
+
+```
+
+### 6.4 Random Forests 
+
+For RF we set only m (set other parameters as J=500 and the minimal number of observations per tree leaf=5)
+
+For mtry square root of features are taken generally. As there are around 50 variables I am doing cross validation for 7, 8 and 9.
+
+```{r}
+
+set.seed(123)
+news_m=c(7,8,9)
+J=500 
+min_size_of_terminal_nodes=5
+n_folds=10
+
+news_RF_fitControl=trainControl(method = "repeatedcv",
+                           number = n_folds,
+                           repeats = 1, classProbs = TRUE, search="random")  
+
+news_RF_grid=expand.grid(mtry = news_m)
+
+news_RF_train <- train(make.names(as.factor(is_popular))~., data = news_train, method = "rf", trControl = news_RF_fitControl, ntree=J, nodesize = min_size_of_terminal_nodes, tuneGrid = news_RF_grid)
+
+print(news_RF_train[["results"]])
+
+```
+
+
+### 6.5 Stochastic Gradient Boosting
+
+
+```{r}
+
+set.seed(123)
+
+news_GBM_control <- trainControl(method='cv',  number=5,  search='grid', summaryFunction = twoClassSummary, classProbs = T)
+
+
+news_GBM_grid <-  expand.grid(interaction.depth = c(2, 3, 5),  n.trees = c(50,100),  shrinkage = c(0.05,0.1), n.minobsinnode = 10)
+
+
+
+print(news_GBM_grid)
+
+```
+
+```{r}
+
+set.seed(123)
+news_GBM_train <- train(make.names(as.factor(is_popular))~., 
+                 data = news_train,
+                 method = 'gbm',
+                 metric = 'ROC',
+                 trControl=news_GBM_control,
+                 tuneGrid = news_GBM_grid,
+                 verbose=FALSE)
+
+print(news_GBM_train)
+
+
+```
+
+
+```{r}
+
+summary(news_GBM_train)
+
+```
+
+
+### 6.6 Comparison
+
+
+
+```{r}
+
+  
+prediction_news_PRA_test <- predict(news_PRA, newx=news_test_matrix, s=c("lambda.min"), type="class")
+prediction_news_PRA_train <-  predict(news_PRA, newx=news_train_matrix, s=c("lambda.min"), type="class")
+
+cm_news_PRA_test <- confusionMatrix(factor(prediction_news_PRA_test), factor(news_test$is_popular))
+cm_news_PRA_train <- confusionMatrix(factor(prediction_news_PRA_train), factor(news_train$is_popular))
+
+
+prediction_news_DT_test <- predict(news_DT, news_test, type="class")
+prediction_news_DT_train <- predict(news_DT, news_train, type="class")
+
+cm_news_DT_test <- confusionMatrix(factor(prediction_news_DT_test), factor(news_test$is_popular))
+cm_news_DT_train <- confusionMatrix(factor(prediction_news_DT_train), factor(news_train$is_popular))
+
+
+prediction_news_RF_test <- predict(news_RF_train, news_test, type="raw")
+prediction_news_RF_train <- predict(news_RF_train, news_train, type="raw")
+
+cm_news_RF_test <- confusionMatrix(factor(prediction_news_RF_test), factor(make.names(news_test$is_popular)))
+cm_news_RF_train <- confusionMatrix(factor(prediction_news_RF_train), factor(make.names(news_train$is_popular)))
+
+
+prediction_news_SGB_test <- predict(news_GBM_train, news_test, type="raw")
+prediction_news_SGB_train <- predict(news_GBM_train, news_train, type="raw")
+
+cm_news_SGB_test <- confusionMatrix(factor(prediction_news_SGB_test), factor(make.names(news_test$is_popular)))
+cm_news_SGB_train <- confusionMatrix(factor(prediction_news_SGB_train), factor(make.names(news_train$is_popular)))
+
+
+
+news_test_performances <- data.table(news_PRA_test=cm_news_PRA_test$overall["Accuracy"], news_DT_test=cm_news_DT_test$overall["Accuracy"], news_RF_test=cm_news_RF_test$overall["Accuracy"], news_SGB_test=cm_news_SGB_test$overall["Accuracy"])
+
+news_train_performances <- data.table(news_PRA_train=cm_news_PRA_train$overall["Accuracy"], news_DT_train=cm_news_DT_train$overall["Accuracy"], news_RF_train=cm_news_RF_train$overall["Accuracy"], news_SGB_train=cm_news_SGB_train$overall["Accuracy"])
+
+news_test_performances
+news_train_performances
+
+```
+
+- Accuracy values are lower in general for this dataset.In this data set target was originally continuous but accuracy was so bad that I modeled it as binary by splitting from median. And it become a binary classification problem. 
+- SGB performed the best. It's accuracy is highest and also its train and test accuracy are very close.
+- In train data accuracy for random forest is almost perfect but it is not the case in test data. Random forest overfitted to the train data. 
+- The cross-validation error rate of different approaches are not really consistent with the test error rate for RF an CART
+- Also for decision tree the difference in 
+- Penalized regression did not work well. The relationships may be not highly nonlinear.
+- In this data there was no class imbalance, I expected the tree based methods to work a lot better that penalized regression but the accuracy values are not that different. It may be because of high number of binary variables in the data set. This may have caused problem with high cardinality.
+
+
+
+## 7 CONCLUSION
+
+
+According to results for 4 dataset my interpretations are as follows:
+
+- Test and cross validation results are close to each other in most cases. Except a few over fitting cases.
+- Random Forest and CART tend to over fit to the train data.
+- With large feature sets SGB performed better compared to other tree based methods.
+- When there is class imbalance, tree based approaches showed bias. Penalized regression worked better.
+- I expected penalized regression approach to work well for regression. With tree based approaches extrapolation can be a problem. But the data waas nonlinear and Penalized regression work better when relationships are not highly nonlinear.
+- CART is tend to over fit even more in regression setting.
+
+
+
+
