@@ -1,0 +1,1023 @@
+---
+title: "Project"
+author: 
+  - Taha BAYAZ
+  - Nazlı GÜL
+  - Zeynep HASGÜL
+date: "02 02 2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: no
+    theme: united
+    highlight: tango
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  word_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center", message = FALSE, warning = FALSE, error = FALSE)
+```
+
+<style>
+#TOC {
+ color: 
+ font-family: Calibri;
+ background-color:
+ border-color: darkred;
+}
+#header {
+ color: darkred;
+ font-family: Calibri;
+ background-color:
+}
+body {
+ font-family: Calibri;
+ }
+ 
+</style>
+
+# PROJECT
+
+## 1. INTRODUCTION
+
+Our data can be downloaded from these links: [train](https://moodle.boun.edu.tr/mod/resource/view.php?id=319739) and [test](https://moodle.boun.edu.tr/mod/resource/view.php?id=319740). This is an anonymous data, so we do not have any information about the features. Our aim is to create the best model for this classification data. Our accuracy metric will be mean of AUC and Balanced Error Rate (BER) scores, which can be calculated with *calculate_score_** functions.
+
+```{r}
+calculate_score = function(true, pred){
+  AUC = auc(true, pred)
+  BER = sum(diag(table(true, pred > 0.5))) / length(true)
+  OverAll = (AUC + BER ) / 2
+  print(paste("AUC is: ", as.character(round(AUC, 4))))
+  print(paste("BER is: ", as.character(round(BER, 4))))
+  print(paste("OverAll is: ", as.character(round(OverAll, 4))))
+  c(round(AUC, 4), round(BER, 4), round(OverAll, 4))
+}
+
+calculate_score_glm = function(model, data){
+  columns = setdiff(colnames(data), "y")
+  X = data.matrix(data[,..columns, with = FALSE])
+  y = data.matrix(data[, y])
+  pred <- predict(model, X, type = "response")
+  calculate_score(y, pred)
+}
+
+calculate_score_rf = function(model, data){
+  target = data[, y]
+  pred <- predict(model, newdata = data, type = "prob")
+  calculate_score(target, pred[, "b"])
+}
+
+calculate_score_sgb = function(model, data){
+  target = data[, y]
+  pred <- predict(model, newdata = data, type = "response")
+  calculate_score(target, 1- pred)
+}
+```
+
+### 2. IMPLEMENTATION
+
+At the beginning, we need to import data and packages.
+
+```{r packages, message=FALSE, warning=FALSE}
+#Required packages
+pti <- c("data.table", "tidyverse", "glmnet", "caret", "rpart", "randomForest", "gbm", "plyr", "ROSE", "pROC", "corrplot", "mlbench")
+pti <- pti[!(pti %in% installed.packages())]
+if(length(pti)>0){
+    install.packages(pti)
+}
+
+library(data.table)
+library(tidyverse)
+library(glmnet)
+library(caret)
+library(rpart)
+library(randomForest)
+library(gbm)
+library(plyr)
+library(ROSE)
+library(pROC)
+library(corrplot)
+library(mlbench)
+
+scores = data.table()
+
+```
+
+```{r}
+train_data = fread("~/Desktop/582_proje/IE582_Fall20_ProjectTrain.csv")
+test_data = fread("~/Desktop/582_proje/IE582_Fall20_ProjectTest.csv")
+head(train_data)
+str(train_data)
+```
+
+As we can see, we have only numeric features. Before moving on to the model creation step, we need to check some information about the data. We can check whether this data has NA values.
+
+```{r}
+anyNA(train_data)
+anyNA(test_data)
+```
+
+As we can see, there is no NA values in the data. So, we don't need any missing value imputation processes. We need to check whether there are duplicated rows.
+
+```{r}
+sum(duplicated(train_data))
+sum(duplicated(test_data))
+```
+
+So, we do not have any duplicated rows. Now, we are ready to get some insights about the data. We can start from the target variable.
+
+```{r}
+table(train_data$y)
+prop.table(table(train_data$y))
+ggplot(train_data, aes(x = y)) + geom_bar()
+```
+
+It means that this data is an imbalanced classification data. We have `r round(prop.table(table(train_data$y))[1], 2) * 100`% of data with one class and the rest is the other class. There is one big problem about this we can not understand the pattern in the data for minority class, which refers to the class that has lower instances rather than the other class. So, it can drive the model to predict all instance for the majority class, which can end up with a high *accuracy* score. So, in this type of problems, to predict minority class correctly is more important then to predict the majority class correctly.
+
+To handle this type of data, there are some methods like listed below:
+
+1) Oversampling: We can replicate instances from the minority class, so that we can have similar number of instances in both classes. The advantage of this method is that we do not lose any information about the data. But, as a disadvantage, we may not very accurate predictions on unseen data because of this replication process.
+
+2) Undersampling: We are selecting some instances from the majority class, so that we can have similar number of instances in both classes. The advantage of this method is that there is no replication process and can create models faster if we have huge data. The disadvantage of this method is that we lose some information in the data.
+
+3) Oversampling and Undersampling: This method is the combination of both oversampling and undersampling methods at the same time. So, this method have advantage and disadvantage of both methods.
+
+4) Synthetic Data Generation: This process is about creating new instances from the minority class. Two instance from the minority class is taken and creating a new instance between these two instances. So, we generate a new instances looks like these instances. The advantage of this method is that we are generating data without losing information or replication. The disadvantage is that we may create some instances that could be from the majority class. It is a very common technic to use for imbalanced data.
+
+5) Cost Sensitive Learning: Normally, we give the same cost for predicting an instance with true or false. Because of that it can be a good model to predict all instances with the majority class. To overcome this issue, we can give costs for the errors. So, our model try to distinguish instances from each other. The advantage is that we can force the model to classify the data rather than predicting all instance from the majority class. The disadvantage is that we may not find the best cost matrix for the model.
+
+Before moving on the data generation steps, we need to check the features variance, correlation and split the data into the train and test set.
+
+```{r}
+colnames(train_data %>% 
+  select_if(~n_distinct(.) <= 1))
+train_data <- train_data %>% 
+  select_if(~n_distinct(.) > 1)
+```
+
+We moved `x50` and `x52` columns from the data. They have the same values for all instances. We can check the correlation between features. 
+
+```{r, fig.width = 15, fig.height = 15}
+M <- cor(train_data %>% select_if(is.numeric))
+
+corrplot(M , method = "number")
+```
+
+We assume that two features are correlated if their correlation is higher than 0.6 or lower than -0.6. So, with this assumption, we can say that these variables are correlated:
+
+-`x23` and `x56`
+-`x23` and `x54`
+-`x28` and `x15`
+
+In any of the model, we should remove one of the correlated columns.To check the values in all columns, we can create boxplots for all columns.
+
+```{r}
+ggplot(stack(train_data[, c("x1", "x2", "x3", "x4", "x5", "x6")]), aes(x = ind, y = values)) +
+  geom_boxplot()
+ggplot(stack(train_data[, c("x7", "x8", "x9", "x10", "x11", "x12")]), aes(x = ind, y = values)) +
+  geom_boxplot()
+ggplot(stack(train_data[, c("x13", "x14", "x15", "x16", "x17", "x18")]), aes(x = ind, y = values)) +
+  geom_boxplot()
+ggplot(stack(train_data[, c("x19", "x20", "x21", "x22", "x23", "x24")]), aes(x = ind, y = values)) +
+  geom_boxplot()
+ggplot(stack(train_data[, c("x25", "x26", "x27", "x28", "x29", "x30")]), aes(x = ind, y = values)) +
+  geom_boxplot()
+ggplot(stack(train_data[, c("x31", "x32", "x33", "x34", "x35", "x36")]), aes(x = ind, y = values)) +
+  geom_boxplot()
+ggplot(stack(train_data[, c("x37", "x38", "x39", "x40", "x41", "x42")]), aes(x = ind, y = values)) +
+  geom_boxplot()
+ggplot(stack(train_data[, c("x43", "x44", "x45", "x46", "x47", "x48")]), aes(x = ind, y = values)) +
+  geom_boxplot()
+ggplot(stack(train_data[, c("x49", "x51", "x53", "x54", "x55", "x56")]), aes(x = ind, y = values)) +
+  geom_boxplot()
+ggplot(stack(train_data[, c("x57", "x58", "x59", "x60", "y")]), aes(x = ind, y = values)) +
+  geom_boxplot()
+```
+
+So we see that we need to turn some columns in to factor, because they have only 0 or 1 values. Also, we can transform the target variable from character to factor.
+
+```{r}
+train_data = train_data %>%
+  mutate_at(c("x2" , "x3",  "x4",  "x12" ,"x13",  "x15", "x16", "x17", "x18" ,"x19" ,"x20", "x21", "x22" ,"x23", "x24", "x25" ,"x26", "x28", "x29", "x31", "x33", "x34" ,"x35" , "x37", "x38" ,"x39" ,"x40", "x41",  "x43", "x44", "x45", "x46", "x47" ,"x48", "x49" ,"x51", "x53", "x54", "x55", "x56" ,"x57" ,"x58", "x59", "x60", "y"), factor)
+```
+
+We can split the data. We use the `createDataPartition` method from the `caret` package. 
+
+```{r}
+set.seed(12345)
+split <- createDataPartition(train_data$y, p = .7, 
+                             list = FALSE, 
+                             times = 1)
+
+train <- train_data[split,]
+test  <- train_data[-split,]
+```
+
+For the cost matrix, we will use the formulation below:
+
+```{r}
+model_weights <- ifelse(train$y == "a",
+                        (1/table(train$y)[1]) * 0.5,
+                        (1/table(train$y)[2]) * 0.5)
+```
+
+Before moving on with sampling methods, we can do some feature engineering processes. In this data, we do not have any information about the columns. So, it would be misleading to create new features, because of having a chance to choose two irrelevant columns.
+
+We can do the sampling methods:
+
+1) Oversampling
+
+```{r}
+train_over <- ovun.sample(y ~ ., data = train, method = "over",N = 2192)$data
+table(train_over$y)
+```
+
+2) Undersampling
+
+```{r}
+train_under <- ovun.sample(y ~ ., data = train, method = "under", N = 714, seed = 3295)$data
+table(train_under$y)
+```
+
+3) Oversampling and Undersampling
+
+```{r}
+train_both <- ovun.sample(y ~ ., data = train, method = "both", p=0.5, N=1000, seed = 1)$data
+table(train_both$y)
+```
+
+4) Synthetic Data Generation:
+
+```{r}
+train_rose <- ROSE(y ~ ., data = train, seed = 1)$data
+table(train_rose$y)
+```
+
+We can do these sampling processes with the `caret train` function. In the `trainControl` function, we can define sampling method as *down*, *up*, *smote* or *rose*. We will also use the results of the train sampling.
+
+Now, we can search for important features in all data. For this purpose, we implemented *random forest* models for all data. Random forest give us some information about the feature importance. To create the best random forest model, we will do a tuning process. The most important parameter in a random forest model is the **number of variables randomly sampled as candidates at each split**. We will try to find best value for that parameter. There are also two important parameters, which are **number of trees to grow** and **minimum size of terminal nodes**. We will set 500 and 5, respectively. We can use the *rf_tuning* function for this purpose.
+
+```{r}
+rf_tuning = function(data){
+  set.seed(12345) 
+  ctrl <- trainControl(method = "cv",
+                     number = 10)
+  
+  model = train(y ~ .,
+                data = data,
+                trControl = ctrl, 
+                tuneGrid =  expand.grid(mtry = seq(floor(ncol(data) / 4), floor(ncol(data) / 2), length.out = 20)),
+                ntree = 100,
+                nodesize = 5,
+                importance = TRUE
+  ) 
+  model
+}
+```
+
+Now we will create these random forest models and choose the important columns from the plot that we can create with *VarImpPlot* function.
+
+```{r}
+rf_train = rf_tuning(train)
+varImpPlot(rf_train$finalModel)
+```
+
+```{r}
+train_varimp = train[,c("x42", "x30", "x23", "x14", "x32", "x36", "x48", "x20", "x44", "x24", "x18", "x13", "x25", "x33", "x60", "x3", "x21", "x51", "x12", "x41", "x47", "x34", "x31", "x58", "x53", "x40", "x39", "x16", "x38", "x10", "x9", "x27", "x11", "x8", "x1", "x7", "x6", "x5", "y")]
+```
+
+```{r}
+rf_train_over = rf_tuning(train_over)
+varImpPlot(rf_train_over$finalModel)
+```
+
+```{r}
+train_over_varimp = train_over[, c("x30", "x32", "x14", "x42", "x11", "x9", "x27", "x8", "x1", "x10", "x5", "x7", "x6", "x23", "x53", "x40", "x24", "x34", "x36", "x20", "x48", "x47", "x41", "x2", "x3", "x12", "x51", "x4", "x58", "x17", "x39", "x44", "x38", "y")]
+```
+
+```{r}
+rf_train_under = rf_tuning(train_under)
+varImpPlot(rf_train_under$finalModel)
+```
+
+```{r}
+train_under_varimp = train_under[, c("x30", "x32", "x14", "x42", "x11", "x9", "x27", "x8", "x1", "x10", "x5", "x7", "x6", "x23", "x53", "x40", "x24", "x34", "x36", "x20", "x48", "x41", "x3", "x12", "x58", "x17", "x39", "x44", "x38", "x16", "x33", "x35", "x45", "x28", "x18", "x22", "x29", "y")]
+```
+
+```{r}
+rf_train_both = rf_tuning(train_both)
+varImpPlot(rf_train_both$finalModel)
+```
+
+```{r}
+train_both_varimp = train_both[, c("x30", "x32", "x14", "x42", "x11", "x9", "x27", "x8", "x1", "x10", "x5", "x7", "x6", "x23", "x53", "x40", "x24", "x34", "x36", "x20", "x48", "x41", "x3",  "x58", "x17", "x39", "x38", "x16", "x33", "x4", "x2", "x47", "y")]
+```
+
+```{r}
+rf_train_rose = rf_tuning(train_rose)
+varImpPlot(rf_train_rose$finalModel)
+```
+
+```{r}
+train_rose_varimp = train_rose[, c("x30", "x32", "x42", "x9", "x23", "x53", "x24", "x36", "x20", "x48", "x58", "x17", "x39", "x38", "x16", "x33", "x57", "x59", "x49", "x60", "x29", "x26", "x13", "x21", "x55", "x14", "x22", "x46", "x25", "x43", "x44", "y")]
+```
+
+Another approach is to choose the best features with *Recursive Feature Elimination* method. In the *caret* package, there is a method called *rfe* to implement this method.
+
+```{r}
+control_rfe <- rfeControl(functions=rfFuncs, method="cv", number=10)
+```
+
+```{r}
+results <- rfe(train[, 1:57], train$y, rfeControl=control_rfe)
+columns = c(predictors(results), "y")
+train_rfe = train[,..columns, with = FALSE]
+```
+
+```{r}
+results <- rfe(train_over[, 1:57], train_over$y, rfeControl=control_rfe)
+columns = c(predictors(results), "y")
+train_over_rfe = train_over[,columns]
+```
+
+```{r}
+results <- rfe(train_under[, 1:57], train_under$y, rfeControl=control_rfe)
+columns = c(predictors(results), "y")
+train_under_rfe = train_under[,columns]
+```
+
+```{r}
+results <- rfe(train_both[, 1:57], train_both$y, rfeControl=control_rfe)
+columns = c(predictors(results), "y")
+train_both_rfe = train_both[,columns]
+```
+
+```{r}
+results <- rfe(train_rose[, 1:57], train_rose$y, rfeControl=control_rfe)
+columns = c(predictors(results), "y")
+train_rose_rfe = train_rose[,columns]
+```
+
+Also, as the last feature selection option, we can remove the columns that have less than 0.01 variance.
+
+```{r}
+apply(train_data[, -c("y")] %>% mutate_all(as.numeric), 2, sd)[order(apply(train_data[, -c("y")] %>% mutate_all(as.numeric), 2, sd))]
+```
+
+It can be seen that we need to remove `x37`, `x57`, `x59`, `x46` and  `x26` columns.
+
+```{r}
+train2 = train[,-c("x37","x57","x59","x46","x26")]
+
+```
+
+Now, we are ready to implement models these data. From the beginning, we can implement Lasso and Ridge regressions. These are penalized regression models and also linear models. For these models, lambda is an important parameter. We need to find the best value for this model with the help of *penalized_tuning* function. After tuning the lambda value, we will use *lambda.1se* value to create the generalized linear model.
+
+```{r}
+penalized_tuning = function(data, alpha = 0){
+  X = data.matrix(data[, 1:(ncol(data)-1)])
+  y = data.matrix(data$y)
+
+  glm_tune = cv.glmnet(X, y, alpha = alpha, family = "binomial", standardize = TRUE)
+  lambda_1se = glm_tune$lambda.1se
+  
+  model = glmnet(X,
+                 y,
+                 lambda = lambda_1se,
+                 family = "binomial",
+                 standardize = TRUE,
+                 alpha = alpha)
+  model
+}
+```
+
+We can create Lasso and Ridge regression models for all data.
+
+```{r}
+lasso_train = penalized_tuning(train, alpha = 1)
+ridge_train = penalized_tuning(train, alpha = 0)
+lasso_train_over = penalized_tuning(train_over, alpha = 1)
+ridge_train_over = penalized_tuning(train_over, alpha = 0)
+lasso_train_under = penalized_tuning(train_under, alpha = 1)
+ridge_train_under = penalized_tuning(train_under, alpha = 0)
+lasso_train_both = penalized_tuning(train_both, alpha = 1)
+ridge_train_both = penalized_tuning(train_both, alpha = 0)
+lasso_train_rose = penalized_tuning(train_rose, alpha = 1)
+ridge_train_rose = penalized_tuning(train_rose, alpha = 0)
+lasso_train_rfe = penalized_tuning(train_rfe, alpha = 1)
+ridge_train_rfe = penalized_tuning(train_rfe, alpha = 0)
+lasso_train_over_rfe = penalized_tuning(train_over_rfe, alpha = 1)
+ridge_train_over_rfe = penalized_tuning(train_over_rfe, alpha = 0)
+lasso_train_under_rfe = penalized_tuning(train_under_rfe, alpha = 1)
+ridge_train_under_rfe = penalized_tuning(train_under_rfe, alpha = 0)
+lasso_train_both_rfe = penalized_tuning(train_both_rfe, alpha = 1)
+ridge_train_both_rfe = penalized_tuning(train_both_rfe, alpha = 0)
+lasso_train_rose_rfe = penalized_tuning(train_rose_rfe, alpha = 1)
+ridge_train_rose_rfe = penalized_tuning(train_rose_rfe, alpha = 0)
+lasso_train2 = penalized_tuning(train2, alpha = 1)
+ridge_train2 = penalized_tuning(train2, alpha = 0)
+```
+
+After creating these models, we need to calculate score for each of them on the test set.
+
+```{r}
+result = calculate_score_glm(lasso_train, test)
+scores = rbind(scores, data.table(data = "train", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(ridge_train, test)
+scores = rbind(scores, data.table(data = "train", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(lasso_train2, test)
+scores = rbind(scores, data.table(data = "train2", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(ridge_train2, test)
+scores = rbind(scores, data.table(data = "train2", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(lasso_train_over, test)
+scores = rbind(scores, data.table(data = "train_over", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(ridge_train_over, test)
+scores = rbind(scores, data.table(data = "train_over", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(lasso_train_under, test)
+scores = rbind(scores, data.table(data = "train_under", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(ridge_train_under, test)
+scores = rbind(scores, data.table(data = "train_under", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(lasso_train_both, test)
+scores = rbind(scores, data.table(data = "train_both", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(ridge_train_both, test)
+scores = rbind(scores, data.table(data = "train_both", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(lasso_train_rose, test)
+scores = rbind(scores, data.table(data = "train_rose", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_glm(ridge_train_rose, test)
+scores = rbind(scores, data.table(data = "train_rose", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+columns = colnames(train_rfe)
+calculate_score_glm(lasso_train_rfe, test[, ..columns])
+scores = rbind(scores, data.table(data = "train_rfe", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+columns = colnames(train_rfe)
+calculate_score_glm(ridge_train_rfe, test[, ..columns])
+scores = rbind(scores, data.table(data = "train_rfe", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+columns = colnames(train_over_rfe)
+calculate_score_glm(lasso_train_over_rfe, test[, ..columns])
+scores = rbind(scores, data.table(data = "train_over_rfe", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+columns = colnames(train_over_rfe)
+calculate_score_glm(ridge_train_over_rfe, test[, ..columns])
+scores = rbind(scores, data.table(data = "train_over_rfe", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+columns = colnames(train_under_rfe)
+calculate_score_glm(lasso_train_under_rfe, test[, ..columns])
+scores = rbind(scores, data.table(data = "train_under_rfe", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+columns = colnames(train_under_rfe)
+calculate_score_glm(ridge_train_under_rfe, test[, ..columns])
+scores = rbind(scores, data.table(data = "train_under_rfe", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+columns = colnames(train_both_rfe)
+calculate_score_glm(lasso_train_both_rfe, test[, ..columns])
+scores = rbind(scores, data.table(data = "train_both_rfe", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+columns = colnames(train_both_rfe)
+calculate_score_glm(ridge_train_both_rfe, test[, ..columns])
+scores = rbind(scores, data.table(data = "train_both_rfe", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+columns = colnames(train_rose_rfe)
+calculate_score_glm(lasso_train_rose_rfe, test[, ..columns])
+scores = rbind(scores, data.table(data = "train_rose_rfe", model = "lasso", AUC = result[1], BER = result[2], OverAll = result[3]))
+columns = colnames(train_rose_rfe)
+calculate_score_glm(ridge_train_rose_rfe, test[, ..columns])
+scores = rbind(scores, data.table(data = "train_rose_rfe", model = "ridge", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl <- trainControl(method = "cv",
+                     number = 10,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+
+glm_weighted <- train(y ~ .,
+                      data = train,
+                      method = "glm",
+                      weights = model_weights,
+                      trControl = ctrl)
+
+pred_weighted_glm <- predict(glm_weighted, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_weighted_glm[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "glm_weighted", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "up"
+
+glm_sampling_up <- train(y ~ .,
+                         data = train,
+                         method = "glm",
+                         trControl = ctrl)
+
+pred_glm_sampling_up <- predict(glm_sampling_up, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_glm_sampling_up[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "glm_up", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+glm_sampling_up2 <- train(y ~ .,
+                         data = train2,
+                         method = "glm",
+                         trControl = ctrl)
+
+pred_glm_sampling_up2 <- predict(glm_sampling_up2, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_glm_sampling_up2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "glm_up", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "down"
+
+glm_sampling_down <- train(y ~ .,
+                           data = train,
+                           method = "glm",
+                           trControl = ctrl)
+
+pred_glm_sampling_down <- predict(glm_sampling_down, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_glm_sampling_down[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "glm_down", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+glm_sampling_down2 <- train(y ~ .,
+                           data = train2,
+                           method = "glm",
+                           trControl = ctrl)
+
+pred_glm_sampling_down2 <- predict(glm_sampling_down2, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_glm_sampling_down2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "glm_down", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "smote"
+
+glm_sampling_smote <- train(y ~ .,
+                            data = train,
+                            method = "glm",
+                            trControl = ctrl)
+
+pred_glm_sampling_smote <- predict(glm_sampling_smote, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_glm_sampling_smote[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "glm_smote", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+glm_sampling_smote2 <- train(y ~ .,
+                            data = train2,
+                            method = "glm",
+                            trControl = ctrl)
+
+pred_glm_sampling_smote2 <- predict(glm_sampling_smote2, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_glm_sampling_smote2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "glm_smote", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "rose"
+
+glm_sampling_rose <- train(y ~ .,
+                           data = train,
+                           method = "glm",
+                           trControl = ctrl)
+
+pred_glm_sampling_rose <- predict(glm_sampling_rose, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_glm_sampling_rose[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "glm_rose", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+glm_sampling_rose2 <- train(y ~ .,
+                           data = train2,
+                           method = "glm",
+                           trControl = ctrl)
+
+pred_glm_sampling_rose2 <- predict(glm_sampling_rose2, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_glm_sampling_rose2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "glm_rose", AUC = result[1], BER = result[2], OverAll = result[3]))
+```
+
+These are the scores for Lasso and Ridge Regressions. We can try for nonlinear models like Model Based Decision Tree, Random Forest or Stochastic Gradient Boosting (SGB).
+
+
+For Random Forest, we can tune parameters with the *rf_tuning* function explained before. 
+
+```{r}
+rf_train2 = rf_tuning(train2)
+rf_train_varimp = rf_tuning(train_varimp)
+rf_train_over_varimp = rf_tuning(train_over_varimp)
+rf_train_under_varimp = rf_tuning(train_under_varimp)
+rf_train_both_varimp = rf_tuning(train_both_varimp)
+rf_train_rose_varimp = rf_tuning(train_rose_varimp)
+rf_train_rfe = rf_tuning(train_rfe)
+rf_train_over_rfe = rf_tuning(train_over_rfe)
+rf_train_under_rfe = rf_tuning(train_under_rfe)
+rf_train_both_rfe = rf_tuning(train_both_rfe)
+rf_train_rose_rfe = rf_tuning(train_rose_rfe)
+```
+
+After creating these models, we need to calculate score for each of them on the test set.
+
+```{r}
+result = calculate_score_rf(rf_train, test)
+scores = rbind(scores, data.table(data = "train", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train2, test)
+scores = rbind(scores, data.table(data = "train2", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_over, test)
+scores = rbind(scores, data.table(data = "train_over", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_under, test)
+scores = rbind(scores, data.table(data = "train_under", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_both, test)
+scores = rbind(scores, data.table(data = "train_both", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_rose, test)
+scores = rbind(scores, data.table(data = "train_rose", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_varimp, test)
+scores = rbind(scores, data.table(data = "train_varimp", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_over_varimp, test)
+scores = rbind(scores, data.table(data = "train_over_varimp", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_under_varimp, test)
+scores = rbind(scores, data.table(data = "train_under_varimp", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_both_varimp, test)
+scores = rbind(scores, data.table(data = "train_both_varimp", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_rose_varimp, test)
+scores = rbind(scores, data.table(data = "train_rose_varimp", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_rfe, test)
+scores = rbind(scores, data.table(data = "train_rfe", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_over_rfe, test)
+scores = rbind(scores, data.table(data = "train_over_rfe", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_under_rfe, test)
+scores = rbind(scores, data.table(data = "train_under_rfe", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_both_rfe, test)
+scores = rbind(scores, data.table(data = "train_both_rfe", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_rf(rf_train_rose_rfe, test)
+scores = rbind(scores, data.table(data = "train_rose_rfe", model = "rf", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl <- trainControl(method = "cv",
+                     number = 10,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+
+rf_weighted <- train(y ~ .,
+                     data = train,
+                     method = "rf",
+                     weights = model_weights,
+                     tuneGrid =  expand.grid(mtry = seq(floor(ncol(train) / 4), floor(ncol(train) / 2), length.out = 20)),
+                     ntree = 100,
+                     nodesize = 5,
+                     metric = "ROC",
+                     verbose = FALSE,
+                     trControl = ctrl)
+
+pred_weighted_rf <- predict(rf_weighted, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_weighted_rf[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "rf_weighted", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "down"
+
+rf_sampling_down <- train(y ~ .,
+                           data = train,
+                           method = "rf",
+                           tuneGrid =  expand.grid(mtry = seq(floor(ncol(train) / 4), floor(ncol(train) / 2), length.out = 20)),
+                           ntree = 100,
+                           nodesize = 5,
+                           metric = "ROC",
+                           verbose = FALSE,
+                           trControl = ctrl)
+
+pred_rf_sampling_down <- predict(rf_sampling_down, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_rf_sampling_down[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "rf_down", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+rf_sampling_down2 <- train(y ~ .,
+                           data = train2,
+                           method = "rf",
+                           tuneGrid =  expand.grid(mtry = seq(floor(ncol(train) / 4), floor(ncol(train) / 2), length.out = 20)),
+                           ntree = 100,
+                           nodesize = 5,
+                           metric = "ROC",
+                           verbose = FALSE,
+                           trControl = ctrl)
+
+pred_rf_sampling_down2 <- predict(rf_sampling_down2, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_rf_sampling_down2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "rf_down", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "up"
+
+rf_sampling_up <- train(y ~ .,
+                        data = train,
+                        method = "rf",
+                        tuneGrid =  expand.grid(mtry = seq(floor(ncol(train) / 4), floor(ncol(train) / 2), length.out = 20)),
+                        ntree = 100,
+                        nodesize = 5,
+                        metric = "ROC",
+                        verbose = FALSE,
+                        trControl = ctrl)
+
+pred_rf_sampling_up <- predict(rf_sampling_up, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_rf_sampling_up[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "rf_up", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+rf_sampling_up2 <- train(y ~ .,
+                        data = train2,
+                        method = "rf",
+                        tuneGrid =  expand.grid(mtry = seq(floor(ncol(train) / 4), floor(ncol(train) / 2), length.out = 20)),
+                        ntree = 100,
+                        nodesize = 5,
+                        metric = "ROC",
+                        verbose = FALSE,
+                        trControl = ctrl)
+
+pred_rf_sampling_up2 <- predict(rf_sampling_up2, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_rf_sampling_up2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "rf_up", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "rose"
+
+rf_sampling_rose <- train(y ~ .,
+                        data = train,
+                        method = "rf",
+                        tuneGrid =  expand.grid(mtry = seq(floor(ncol(train) / 4), floor(ncol(train) / 2), length.out = 20)),
+                        ntree = 100,
+                        nodesize = 5,
+                        metric = "ROC",
+                        verbose = FALSE,
+                        trControl = ctrl)
+
+pred_rf_sampling_rose <- predict(rf_sampling_rose, newdata = test, type = "prob")
+result = calculate_score(test$y, 1- pred_rf_sampling_rose[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "rf_rose", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+rf_sampling_rose2 <- train(y ~ .,
+                        data = train2,
+                        method = "rf",
+                        tuneGrid =  expand.grid(mtry = seq(floor(ncol(train) / 4), floor(ncol(train) / 2), length.out = 20)),
+                        ntree = 100,
+                        nodesize = 5,
+                        metric = "ROC",
+                        verbose = FALSE,
+                        trControl = ctrl)
+
+pred_rf_sampling_rose2 <- predict(rf_sampling_rose2, newdata = test, type = "prob")
+result = calculate_score(test$y, 1- pred_rf_sampling_rose2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "rf_rose", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "smote"
+
+rf_sampling_smote <- train(y ~ .,
+                           data = train,
+                           method = "rf",
+                           tuneGrid =  expand.grid(mtry = seq(floor(ncol(train) / 4), floor(ncol(train) / 2), length.out = 20)),
+                           ntree = 100,
+                           nodesize = 5,
+                           metric = "ROC",
+                           verbose = FALSE,
+                           trControl = ctrl)
+
+pred_rf_sampling_smote <- predict(rf_sampling_smote, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_rf_sampling_smote[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "rf_smote", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+rf_sampling_smote2 <- train(y ~ .,
+                           data = train2,
+                           method = "rf",
+                           tuneGrid =  expand.grid(mtry = seq(floor(ncol(train) / 4), floor(ncol(train) / 2), length.out = 20)),
+                           ntree = 100,
+                           nodesize = 5,
+                           metric = "ROC",
+                           verbose = FALSE,
+                           trControl = ctrl)
+
+pred_rf_sampling_smote2 <- predict(rf_sampling_smote2, newdata = test, type = "prob")
+result = calculate_score(test$y, pred_rf_sampling_smote2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "rf_smote", AUC = result[1], BER = result[2], OverAll = result[3]))
+```
+
+Now, we can implement the SGB models for these data. The most important parameters in a Stochastic Gradient Boosting model are **depth of the tree**, **learning rate** and **number of trees**. We will try to find best value for that parameter. There is also one more import parameter, which is **the minimal number of observations per tree leaf**. We will set 10 for this value. For parameter tuning, we will use *sgb_tuning* function.
+
+```{r}
+
+sgb_tuning = function(data){
+  data_used = data %>%
+    mutate(y = ifelse(y == "a", 1, 0))
+
+  grid = expand.grid(shrinkage = seq(.01, .1, by = 0.001), interaction.depth = c(3, 5, 7, 9, 11, 13, 15), n.trees = c(80, 100, 120, 150, 200), n.minobsinnode = 10)
+  
+  for(i in 1:nrow(grid)) {
+    set.seed(12345)
+    
+    gbm_model <- gbm(y ~ .,
+                     data = data_used,
+                     distribution = "bernoulli",
+                     interaction.depth = grid$interaction.depth[i],
+                     n.trees = grid$n.trees[i],
+                     shrinkage = grid$shrinkage[i],
+                     n.minobsinnode = grid$n.minobsinnode[i],
+                     train.fraction = .75,
+                     n.cores = NULL,
+                     verbose = FALSE
+    )
+    grid$min_RMSE[i] <- sqrt(min(gbm_model$valid.error))
+  }
+  best_param = grid[which.min(grid$min_RMSE),]
+  
+  model <- gbm(y ~ .,
+                   data = data_used,
+                   distribution = "bernoulli",
+                   interaction.depth = best_param$interaction.depth,
+                   n.trees = best_param$n.trees,
+                   shrinkage = best_param$shrinkage,
+                   n.minobsinnode = best_param$n.minobsinnode,
+                   train.fraction = .75,
+                   n.cores = NULL,
+                   verbose = FALSE
+  ) 
+  model
+}
+```
+
+```{r}
+sgb_train = sgb_tuning(train)
+sgb_train2 = sgb_tuning(train2)
+sgb_train_over = sgb_tuning(train_over)
+sgb_train_under = sgb_tuning(train_under)
+sgb_train_both = sgb_tuning(train_both)
+sgb_train_rose = sgb_tuning(train_rose)
+sgb_train_varimp = sgb_tuning(train_varimp)
+sgb_train_over_varimp = sgb_tuning(train_over_varimp)
+sgb_train_under_varimp = sgb_tuning(train_under_varimp)
+sgb_train_both_varimp = sgb_tuning(train_both_varimp)
+sgb_train_rose_varimp = sgb_tuning(train_rose_varimp)
+sgb_train_rfe = sgb_tuning(train_rfe)
+sgb_train_over_rfe = sgb_tuning(train_over_rfe)
+sgb_train_under_rfe = sgb_tuning(train_under_rfe)
+sgb_train_both_rfe = sgb_tuning(train_both_rfe)
+sgb_train_rose_rfe = sgb_tuning(train_rose_rfe)
+```
+
+After creating these models, we need to calculate score for each of them on the test set.
+
+```{r}
+result = calculate_score_sgb(sgb_train, test)
+scores = rbind(scores, data.table(data = "train", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train2, test)
+scores = rbind(scores, data.table(data = "train2", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_over, test)
+scores = rbind(scores, data.table(data = "train_over", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_under, test)
+scores = rbind(scores, data.table(data = "train_under", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_both, test)
+scores = rbind(scores, data.table(data = "train_both", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_rose, test)
+scores = rbind(scores, data.table(data = "train_rose", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_varimp, test)
+scores = rbind(scores, data.table(data = "train_varimp", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_over_varimp, test)
+scores = rbind(scores, data.table(data = "train_over_varimp", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_under_varimp, test)
+scores = rbind(scores, data.table(data = "train_under_varimp", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_both_varimp, test)
+scores = rbind(scores, data.table(data = "train_both_varimp", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_rose_varimp, test)
+scores = rbind(scores, data.table(data = "train_rose_varimp", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_rfe, test)
+scores = rbind(scores, data.table(data = "train_rfe", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_over_rfe, test)
+scores = rbind(scores, data.table(data = "train_over_rfe", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_under_rfe, test)
+scores = rbind(scores, data.table(data = "train_under_rfe", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_both_rfe, test)
+scores = rbind(scores, data.table(data = "train_both_rfe", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+result = calculate_score_sgb(sgb_train_rose_rfe, test)
+scores = rbind(scores, data.table(data = "train_rose_rfe", model = "sgb", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl <- trainControl(method = "cv",
+                     number = 10,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+
+grid = expand.grid(shrinkage = seq(.01, .1, by = 0.005), interaction.depth = c(3, 5, 7, 9, 11), n.trees = c(80, 100, 120, 150, 200), n.minobsinnode = 10)
+
+train_sgb = train %>%
+  mutate(y = as.factor(y))
+train_sgb2 = train2 %>%
+  mutate(y = as.factor(y))
+test_sgb = test %>%
+  mutate(y = as.factor(y))
+
+sgb_weighted <- train(y ~ .,
+                      data = train_sgb,
+                      method = "gbm",
+                      weights = model_weights,
+                      distribution = "bernoulli",
+                      tuneGrid =  grid,
+                      verbose = FALSE,
+                      trControl = ctrl)
+
+pred_weighted_sgb <- predict(sgb_weighted, newdata = test_sgb, type = "prob")
+result = calculate_score(test_sgb$y, pred_weighted_sgb[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "sgb_weighted", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "down"
+
+sgb_sampling_down <- train(y ~ .,
+                           data = train_sgb,
+                           method = "gbm",
+                           distribution = "bernoulli",
+                           tuneGrid =  grid,
+                           verbose = FALSE,
+                           trControl = ctrl)
+
+pred_sgb_sampling_down <- predict(sgb_sampling_down, newdata = test_sgb, type = "prob")
+result = calculate_score(test$y, pred_sgb_sampling_down[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "sgb_down", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+sgb_sampling_down2 <- train(y ~ .,
+                           data = train_sgb2,
+                           method = "gbm",
+                           distribution = "bernoulli",
+                           tuneGrid =  grid,
+                           verbose = FALSE,
+                           trControl = ctrl)
+
+pred_sgb_sampling_down2 <- predict(sgb_sampling_down2, newdata = test_sgb, type = "prob")
+result = calculate_score(test$y, pred_sgb_sampling_down2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "sgb_down", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "up"
+
+sgb_sampling_up <- train(y ~ .,
+                         data = train_sgb,
+                         method = "gbm",
+                         distribution = "bernoulli",
+                         tuneGrid =  grid,
+                         verbose = FALSE,
+                         trControl = ctrl)
+
+pred_sgb_sampling_up <- predict(sgb_sampling_up, newdata = test_sgb, type = "prob")
+result = calculate_score(test$y, pred_sgb_sampling_up[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "sgb_up", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+sgb_sampling_up2 <- train(y ~ .,
+                         data = train_sgb2,
+                         method = "gbm",
+                         distribution = "bernoulli",
+                         tuneGrid =  grid,
+                         verbose = FALSE,
+                         trControl = ctrl)
+
+pred_sgb_sampling_up2 <- predict(sgb_sampling_up2, newdata = test_sgb, type = "prob")
+result = calculate_score(test$y, pred_sgb_sampling_up2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "sgb_up", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "rose"
+
+sgb_sampling_rose <- train(y ~ .,
+                           data = train_sgb,
+                           method = "gbm",
+                           distribution = "bernoulli",
+                           tuneGrid =  grid,
+                           verbose = FALSE,
+                           trControl = ctrl)
+
+pred_sgb_sampling_rose <- predict(sgb_sampling_rose, newdata = test_sgb, type = "prob")
+result = calculate_score(test$y, pred_sgb_sampling_rose[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "sgb_rose", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+sgb_sampling_rose2 <- train(y ~ .,
+                           data = train_sgb2,
+                           method = "gbm",
+                           distribution = "bernoulli",
+                           tuneGrid =  grid,
+                           verbose = FALSE,
+                           trControl = ctrl)
+
+pred_sgb_sampling_rose2 <- predict(sgb_sampling_rose2, newdata = test_sgb, type = "prob")
+result = calculate_score(test$y, pred_sgb_sampling_rose2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "sgb_rose", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+ctrl$sampling = "smote"
+
+sgb_sampling_smote <- train(y ~ .,
+                            data = train_sgb,
+                            method = "gbm",
+                            distribution = "bernoulli",
+                            tuneGrid =  grid,
+                            verbose = FALSE,
+                            trControl = ctrl)
+
+pred_sgb_sampling_smote <- predict(sgb_sampling_smote, newdata = test_sgb, type = "prob")
+result = calculate_score(test$y, pred_sgb_sampling_smote[, "b"])
+scores = rbind(scores, data.table(data = "train", model = "sgb_smote", AUC = result[1], BER = result[2], OverAll = result[3]))
+
+sgb_sampling_smote2 <- train(y ~ .,
+                            data = train_sgb2,
+                            method = "gbm",
+                            distribution = "bernoulli",
+                            tuneGrid =  grid,
+                            verbose = FALSE,
+                            trControl = ctrl)
+
+pred_sgb_sampling_smote2 <- predict(sgb_sampling_smote2, newdata = test_sgb, type = "prob")
+result = calculate_score(test$y, pred_sgb_sampling_smote2[, "b"])
+scores = rbind(scores, data.table(data = "train2", model = "sgb_smote", AUC = result[1], BER = result[2], OverAll = result[3]))
+```
+
+
+
+
+
+
+
+
+
+## REFERENCES
+1) [Imbalance Classification Data Description](https://machinelearningmastery.com/what-is-imbalanced-classification/#:~:text=Imbalanced%20Classification%20Problems,-The%20number%20of&text=Imbalanced%20classification%20refers%20to%20a,is%20instead%20biased%20or%20skewed.)
+2) [ımbalance Classification Problem Examples](https://www.analyticsvidhya.com/blog/2016/03/practical-guide-deal-imbalanced-classification-problems/)
+3) [Sampling method](https://www.rdocumentation.org/packages/ROSE/versions/0.0-3/topics/ovun.sample)
+4) [Caret Subsampling](https://topepo.github.io/caret/subsampling-for-class-imbalances.html)
+5) [Recursive Feature Elimination](https://machinelearningmastery.com/feature-selection-with-the-caret-r-package/)
