@@ -13,7 +13,9 @@ You can reach my penalized regression application on Turkish electricity consump
 You can reach my penalized regression application on Turkish electricity consumption data from this [link](IE582_HW3.html).
 ### **Home Work 4:** Comparing Performance of Models (29.01.2021)
 You can reach my report on performance comparison of the methods; penalized regression, decision trees, and tree-based ensembles from this [link](Son_IE582_HW4_ZH.html).
-### **Group Project :** Working with Class Imbalanced (15.02.2021)
-You can reach our project report for group "Runtime Terror" from this [link](IE582_ProjectReport.html).
-You can reach RMarkdown of the codes  from this [link](IE582_Project_Rmarkdown.html).
-You can reach R script from this [link](IE582_Project_Rmarkdown.Rmd).
+### **Term Project :** Working with Class Imbalanced (15.02.2021)
+**Group "Runtime Terror"**
+
+You can reach our **project report**  from this [link](IE582_ProjectReport.html).
+You can reach **knitted codes for RMarkdown** from this [link](IE582_Project_Rmarkdown.html).
+You can reach **Rmd codes** for from this [link](IE582_Project_Rmarkdown.Rmd).
