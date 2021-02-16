@@ -21,4 +21,4 @@ You can reach my report on performance comparison of the methods; penalized regr
 - You can reach our **project report**  from this [link](IE582_ProjectReport.html).
 - You can reach **knitted codes for RMarkdown** from this [link](RuntimeTerror_Project.html).
 - You can reach **Rmd codes** for from this [link](IE582_Project_Rmarkdown.Rmd).
-- You can reach our **project presentation**  from this [link](https://bu-ie-582.github.io/fall20-TahaBayaz/Project/Project.html).
+- You can reach our **project presentation**  from this [link](https://www.dropbox.com/s/gy98k2tvx8wyrf5/IE582%20Project%20Presentation.mov?dl=0).
